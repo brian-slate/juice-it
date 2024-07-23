@@ -1,11 +1,11 @@
 {
   "name": "juice-it",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A script to rip DVDs using HandBrakeCLI",
   "main": "juiceit.js",
   "scripts": {
     "create-tarball": "bash ./bin/create_tarball.sh $npm_package_version",
-    "release": "standard-version && npm run create-tarball && git add releases/*.tar.gz && git commit -m 'Add release tarball for version $npm_package_version' && git tag v$npm_package_version && git push --follow-tags && gh release create v$npm_package_version releases/*.tar.gz --title 'Release v$npm_package_version' --notes 'Release notes for version $npm_package_version'"
+    "release": "standard-version && npm run create-tarball && git add releases/*.tar.gz && git commit -m 'Add release tarball for version $npm_package_version' && git push --follow-tags && gh release create v$npm_package_version releases/*.tar.gz --title 'Release v$npm_package_version' --notes 'Release notes for version $npm_package_version'"
   },
   "dependencies": {
     "node-pty": "^1.0.0"
