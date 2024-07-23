@@ -1,6 +1,6 @@
 {
   "name": "juice-it",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A script to rip DVDs using HandBrakeCLI",
   "main": "juiceit.js",
   "scripts": {
