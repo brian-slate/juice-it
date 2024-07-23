@@ -1,8 +1,8 @@
 class Juiceit < Formula
     desc "A script to rip DVDs using HandBrakeCLI"
     homepage "https://github.com/brian-slate/juice-it"
-    url "https://github.com/brian-slate/juice-it/releases/download/v1.0.10/juice-it-v1.0.10.tar.gz"
-    sha256 "de5f9bc0f3804ab8edcc3f18851fc298d2137a7e333490cf301a743924c59072"
+    url "https://github.com/brian-slate/juice-it/releases/download/v1.0.11/juice-it-v1.0.11.tar.gz"
+    sha256 "0cbf1ce078f126894b7ec3d254ba644de0dd3a1a915f97adb48c011eeaaedcde"
 
     depends_on "node"
     depends_on "handbrake"
