@@ -1,5 +1,18 @@
 {
+  "name": "juice-it",
+  "version": "1.0.0",
+  "description": "A script to rip DVDs using HandBrakeCLI",
+  "main": "juiceit.js",
+  "scripts": {
+    "create-tarball": "tar -czvf juice-it-v$npm_package_version.tar.gz ./",
+    "release": "standard-version && npm run create-tarball"
+  },
   "dependencies": {
     "node-pty": "^1.0.0"
-  }
+  },
+  "devDependencies": {
+    "standard-version": "^9.3.2"
+  },
+  "author": "Your Name",
+  "license": "MIT"
 }
