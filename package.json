@@ -4,7 +4,7 @@
   "description": "A script to rip DVDs using HandBrakeCLI",
   "main": "juiceit.js",
   "scripts": {
-    "create-tarball": "tar -czvf juice-it-v$npm_package_version.tar.gz ./",
+    "create-tarball": "bash ./bin/create_tarball.sh $npm_package_version",
     "release": "standard-version && npm run create-tarball"
   },
   "dependencies": {
