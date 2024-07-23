@@ -5,7 +5,7 @@
   "main": "juiceit.js",
   "scripts": {
     "create-tarball": "bash ./bin/create_tarball.sh $npm_package_version",
-    "release": "standard-version && npm run create-tarball"
+    "release": "standard-version && npm run create-tarball && git add releases/*.tar.gz && git commit -m 'Add release tarball for version $npm_package_version' && git push --follow-tags"
   },
   "dependencies": {
     "node-pty": "^1.0.0"
