@@ -19,6 +19,6 @@ cd "$PROJECT_DIR" || { echo "Project directory not found"; exit 1; }
 mkdir -p releases
 
 # Create the tarball, excluding the .git and releases directories
-tar -czvf "releases/$TARBALL_NAME" --exclude='.git' --exclude='releases' --exclude='bin' ./*
+tar -czvf "releases/$TARBALL_NAME" --exclude='.git' --exclude='releases' --exclude='bin' --exclude='homebrew' ./*
 
 echo "Tarball created: releases/$TARBALL_NAME"
