@@ -11,8 +11,10 @@
  *   --help      Show this help message
  *   --output    Specify the output directory
  *   --dvdSource Specify the DVD source (e.g., /dev/disk5)
- *   --quality   Set the encoding quality (e.g., 18)
+ *   --quality   Set the encoding quality (e.g., 20)
  *   --no-deinterlace  Disable deinterlacing
+ *   --subtitles  Specify the subtitle track number (default: 1)
+ *   --sub-lang   Specify the subtitle language code (default: eng)
  * 
  * Example:
  *   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
@@ -39,6 +41,10 @@ const options = {
         quality: '20',    // Default quality
         deinterlace: true, // Default to enabled
     },
+    subtitles: {
+        track: 1, // Default to the first subtitle track
+        language: 'eng' // Default to English
+    }
 };
 
 // Process command-line arguments
@@ -53,6 +59,10 @@ args.forEach((arg, index) => {
         options.encoding.quality = args[index + 1]; // Set quality from argument
     } else if (arg === '--no-deinterlace') {
         options.encoding.deinterlace = false; // Disable deinterlacing
+    } else if (arg === '--subtitles' && args[index + 1]) {
+        options.subtitles.track = parseInt(args[index + 1], 10); // Set subtitle track from argument
+    } else if (arg === '--sub-lang' && args[index + 1]) {
+        options.subtitles.language = args[index + 1]; // Set subtitle language from argument
     }
 });
 
@@ -122,13 +132,18 @@ if (options.showHelp || args.length === 0) {
 function ripDvd(titleNumber, outputFileName, onProgress) {
     return new Promise((resolve, reject) => {
         const outputFilePath = path.join(options.outputDir, `${outputFileName}.mp4`); // Use options.outputDir
-        // Updated arguments for HandBrakeCLI with conditional deinterlacing
+        // Updated arguments for HandBrakeCLI with conditional deinterlacing, subtitles, and additional options
         const args = [
             '-i', options.dvdSource,
             '-o', outputFilePath,
             '-e', options.encoding.encoder,
             '-q', options.encoding.quality,
             '-t', titleNumber.toString(),
+            '--subtitle', options.subtitles.track.toString(), // Include the specified subtitle track
+            '--decomb', // Use decomb filter for deinterlacing
+            '--detelecine', // Use detelecine filter
+            '--rate', '30', // Set frame rate to 30 fps
+            '--preset', 'HQ 1080p30 Surround' // Use a valid preset
         ];
 
         // Add deinterlace option if enabled
@@ -136,18 +151,22 @@ function ripDvd(titleNumber, outputFileName, onProgress) {
             args.push('--deinterlace');
         }
 
+        // Log the HandBrakeCLI command
+        console.log(`⚙️ Running HandBrakeCLI with command: HandBrakeCLI ${args.join(' ')}`);
+
         const handbrakeProcess = spawn('HandBrakeCLI', args);
 
         handbrakeProcess.stdout.on('data', (data) => {
             const output = data.toString();
             const progressMatch = output.match(/Encoding:.* (\d{1,3}\.\d{1,2}) %/);
             if (progressMatch && progressMatch[1]) {
-                onProgress(progressMatch[1]);
+                const progress = progressMatch[1];
+                onProgress(progress);
             }
         });
 
         handbrakeProcess.stderr.on('data', (data) => {
-            console.error(`stderr: ${data}`);
+            console.log(`\n[handbrake-info]: ${data}`);
         });
 
         handbrakeProcess.on('close', (code) => {
@@ -160,7 +179,7 @@ function ripDvd(titleNumber, outputFileName, onProgress) {
     });
 }
 
-// Function to get volume name using diskutil
+// Get volume name using diskutil
 function getVolumeName() {
     try {
         const output = execSync(`diskutil info ${options.dvdSource}`).toString();
@@ -172,7 +191,7 @@ function getVolumeName() {
     }
 }
 
-// Function to get number of titles with caching
+// Get number of titles with caching
 async function getNumberOfTitles() {
     console.log('Fetching disc title information...');
     const volumeName = getVolumeName(); // Get the current volume name
@@ -247,7 +266,6 @@ if (fs.existsSync(cacheFilePath)) {
     }
 }
 
-// Function to rip all tracks
 async function ripAllTracks() {
     try {
         const numTitles = await getNumberOfTitles(); // Get the number of titles
@@ -256,10 +274,13 @@ async function ripAllTracks() {
             const outputFileName = `Track_${titleNumber}`;
             console.log(`Ripping ${outputFileName}...`);
             await ripDvd(titleNumber, outputFileName, (progress) => {
-                console.log(`Progress: ${progress}%`);
+                // Overwrite the same line for progress updates
+                process.stdout.write(`\rProgress: ${progress}%`);
             });
+            // Move to the next line after each track is done
+            console.log(); // This will create a new line after each track is completed
         }
-        console.log('Ripping complete.');
+        console.log('⚡️ Ripping Complete');
     } catch (error) {
         console.error(`Error during ripping: ${error}`);
     }
@@ -279,8 +300,10 @@ Options:
   --help        Show this help message
   --output      Specify the output directory
   --dvdSource   Specify the DVD source path (e.g., /dev/disk5)
-  --quality     Set the encoding quality (e.g., 18)
+  --quality     Set the encoding quality (e.g., 20)
   --no-deinterlace  Disable deinterlacing
+  --subtitles   Specify the subtitle track number (default: 1)
+  --sub-lang    Specify the subtitle language code (default: eng)
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
