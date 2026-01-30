@@ -66,9 +66,48 @@ function closeLog() {
     }
 }
 
+// ==================== CONFIG MANAGEMENT ====================
+
+// Get config directory path
+function getConfigDir() {
+    const os = require('os');
+    if (process.platform === 'darwin') {
+        return path.join(os.homedir(), '.config', 'juice-it');
+    } else if (process.platform === 'win32') {
+        return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'juice-it');
+    } else {
+        return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'juice-it');
+    }
+}
+
+// Load config from file
+function loadConfig() {
+    const configPath = path.join(getConfigDir(), 'config.json');
+    if (fs.existsSync(configPath)) {
+        try {
+            return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        } catch (error) {
+            return {};
+        }
+    }
+    return {};
+}
+
+// Save config to file
+function saveConfig(config) {
+    const configDir = getConfigDir();
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    }
+    const configPath = path.join(configDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+}
+
 // ==================== METADATA LOOKUP ====================
 
-const TMDB_API_KEY = 'REMOVED_API_KEY'; // Read-only demo key
+// Load API key from config or use demo key
+const config = loadConfig();
+const TMDB_API_KEY = config.tmdbApiKey || 'REMOVED_API_KEY'; // Demo key fallback
 
 async function searchTMDB(query, isTV = false) {
     try {
@@ -103,6 +142,76 @@ async function getTVSeasonDetails(tvId, seasonNumber) {
             console.log(`Error fetching season details: ${error.message}`);
         }
         return null;
+    }
+}
+
+// Validate TMDB API key
+async function validateTmdbApiKey(apiKey) {
+    try {
+        const response = await axios.get('https://api.themoviedb.org/3/configuration', {
+            params: { api_key: apiKey },
+            timeout: 5000
+        });
+        return response.status === 200;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Setup workflow for API key configuration
+async function runSetup() {
+    console.log('');
+    console.log('━'.repeat(60));
+    console.log('  🔑 JuiceIt TMDB API Key Setup');
+    console.log('━'.repeat(60));
+    console.log('');
+    console.log('To use metadata lookup, you need a free TMDB API key.');
+    console.log('');
+    console.log('📋 Steps to get your API key:');
+    console.log('  1. Create account at https://www.themoviedb.org/signup');
+    console.log('  2. Go to https://www.themoviedb.org/settings/api');
+    console.log('  3. Request an API key (choose "Developer" option)');
+    console.log('  4. Copy your "API Key (v3 auth)"');
+    console.log('');
+    
+    const prompt = new Input({
+        message: 'Enter your TMDB API key:',
+        validate(value) {
+            return value.length > 0 || 'API key cannot be empty';
+        }
+    });
+    
+    try {
+        const apiKey = await prompt.run();
+        
+        console.log('');
+        console.log('🔍 Validating API key...');
+        
+        const isValid = await validateTmdbApiKey(apiKey);
+        
+        if (isValid) {
+            const config = loadConfig();
+            config.tmdbApiKey = apiKey;
+            saveConfig(config);
+            
+            console.log('✅ API key validated and saved!');
+            console.log('');
+            console.log(`Config saved to: ${path.join(getConfigDir(), 'config.json')}`);
+            console.log('');
+            console.log('You can now use JuiceIt with metadata lookup.');
+            console.log('');
+        } else {
+            console.log('❌ Invalid API key. Please check and try again.');
+            console.log('');
+            console.log('Run `juiceit --setup` to try again.');
+            console.log('');
+            process.exit(1);
+        }
+    } catch (error) {
+        console.log('');
+        console.log('Setup cancelled.');
+        console.log('');
+        process.exit(0);
     }
 }
 
@@ -319,6 +428,8 @@ args.forEach((arg, index) => {
         options.renameOnly = true; // Only rename existing files
     } else if (arg === '--scan-only') {
         options.scanOnly = true; // Only scan and show metadata
+    } else if (arg === '--setup') {
+        options.runSetup = true; // Run API key setup
     }
 });
 
@@ -518,12 +629,28 @@ if (options.showHelp) {
     process.exit(0);
 }
 
-// Async initialization function
-(async () => {
-    // Set dvdSource if not provided
-    if (!options.dvdSource) {
-        options.dvdSource = await detectDvdSource(); // Automatically detect DVD source
+// Run setup if requested
+if (options.runSetup) {
+    (async () => {
+        await runSetup();
+    })();
+    // Exit early - don't continue to ripping
+} else {
+    // Show warning if using demo key
+    if (!config.tmdbApiKey && !options.noLookup) {
+        console.log('');
+        console.log('⚠️  Using demo TMDB API key (rate limited)');
+        console.log('   Get your free API key: https://www.themoviedb.org/settings/api');
+        console.log('   Run: juiceit --setup');
+        console.log('');
     }
+
+    // Async initialization function
+    (async () => {
+        // Set dvdSource if not provided
+        if (!options.dvdSource) {
+            options.dvdSource = await detectDvdSource(); // Automatically detect DVD source
+        }
 
     // Fallback if no DVD source is detected
     if (!options.dvdSource) {
@@ -531,13 +658,14 @@ if (options.showHelp) {
         process.exit(1);
     }
 
-    // Start the ripping or renaming process
-    if (options.renameOnly) {
-        await renameExistingFiles();
-    } else {
-        await ripAllTracks();
-    }
-})();
+        // Start the ripping or renaming process
+        if (options.renameOnly) {
+            await renameExistingFiles();
+        } else {
+            await ripAllTracks();
+        }
+    })();
+}
 
 // Function to rip DVD with progress output
 function ripDvd(titleNumber, outputFileName, trackNum, totalTracks, onProgress) {
@@ -1255,6 +1383,7 @@ Usage:
 
 Options:
   --help            Show this help message
+  --setup           Configure TMDB API key for metadata lookup
   --output          Specify the output directory (default: <disc_name>_<date>)
   --dvdSource       Specify the DVD source path (e.g., /dev/disk5)
   --quality         Set the encoding quality (e.g., 20)
