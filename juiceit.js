@@ -32,7 +32,7 @@ const pty = require('node-pty');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { Select, Input } = require('enquirer');
+const { Select, Input, AutoComplete } = require('enquirer');
 
 // ==================== LOGGING ====================
 
@@ -178,12 +178,16 @@ async function lookupMetadata(volumeName, numTitles) {
     }
     
     try {
-        const prompt = new Select({
+        // Use AutoComplete for searchable selection
+        const prompt = new AutoComplete({
             name: 'media',
-            message: 'Select the correct match:',
-            choices: choices,
+            message: 'Select the correct match (type to search):',
+            limit: 10,
+            choices: choices.map(c => c.name),
             result(name) {
-                return this.focused.value;
+                // Find the choice that matches the selected name
+                const choice = choices.find(ch => ch.name === name);
+                return choice ? choice.value : null;
             }
         });
         
@@ -314,6 +318,8 @@ args.forEach((arg, index) => {
         options.noLookup = true; // Skip metadata lookup
     } else if (arg === '--rename-only') {
         options.renameOnly = true; // Only rename existing files
+    } else if (arg === '--scan-only') {
+        options.scanOnly = true; // Only scan and show metadata
     }
 });
 
@@ -330,9 +336,32 @@ function setDefaultOutputDir(volumeName) {
     }
 }
 
-// Cache file path will be set dynamically in getNumberOfTitles
+// Cache file path will be set dynamically
 function getCacheFilePath() {
-    return path.join(options.outputDir || process.cwd(), '.dvd_cache.json');
+    // Use system cache directory instead of polluting output folder
+    const os = require('os');
+    let cacheDir;
+    
+    if (process.platform === 'darwin') {
+        // macOS: ~/Library/Caches/juice-it
+        cacheDir = path.join(os.homedir(), 'Library', 'Caches', 'juice-it');
+    } else if (process.platform === 'win32') {
+        // Windows: %LOCALAPPDATA%\juice-it\cache
+        cacheDir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'juice-it', 'cache');
+    } else {
+        // Linux/Unix: ~/.cache/juice-it
+        cacheDir = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'juice-it');
+    }
+    
+    // Ensure cache directory exists
+    if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+    }
+    
+    // Use volume name in cache filename to support multiple discs
+    const volumeName = getVolumeName();
+    const safeVolumeName = volumeName ? volumeName.replace(/[^a-zA-Z0-9_-]/g, '_') : 'unknown';
+    return path.join(cacheDir, `${safeVolumeName}.json`);
 }
 
 // Check if HandBrakeCLI is installed
@@ -474,7 +503,7 @@ function getVolumeName() {
     }
 }
 
-// Get number of titles with caching
+// Get number of titles with caching and duration information
 async function getNumberOfTitles() {
     process.stdout.write('🔍 Scanning disc...');
     const volumeName = getVolumeName(); // Get the current volume name
@@ -497,6 +526,10 @@ async function getNumberOfTitles() {
         if (cacheData.volumeName === volumeName) {
             console.log(` ✓ Found ${cacheData.numTitles} title${cacheData.numTitles > 1 ? 's' : ''} (cached)`);
             console.log('');
+            // Store title durations globally if available
+            if (cacheData.titleDurations) {
+                global.dvdTitleDurations = cacheData.titleDurations;
+            }
             return cacheData.numTitles;
         } else if (options.verbose) {
             console.log("Volume names do not match. Cache will be ignored.");
@@ -537,10 +570,49 @@ async function getNumberOfTitles() {
                     console.log(` ✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
                     console.log('');
 
-                    // Cache the title information with volume name
-                    fs.writeFileSync(cacheFilePath, JSON.stringify({ volumeName, numTitles }));
+                    // Parse title durations from HandBrakeCLI output
+                    const titleDurations = {};
+                    // Match format: "+ title 1:" followed by "  + duration: 00:27:45"
+                    const titleMatches = output.matchAll(/\+ title (\d+):[\s\S]*?\+ duration: (\d{2}):(\d{2}):(\d{2})/g);
+                    for (const titleMatch of titleMatches) {
+                        const titleNum = parseInt(titleMatch[1], 10);
+                        const hours = parseInt(titleMatch[2], 10);
+                        const mins = parseInt(titleMatch[3], 10);
+                        const secs = parseInt(titleMatch[4], 10);
+                        const totalMinutes = hours * 60 + mins + Math.round(secs / 60);
+                        titleDurations[titleNum] = totalMinutes;
+                    }
+                    
+                    // Store globally for use during ripping
+                    global.dvdTitleDurations = titleDurations;
+
+                    // Display track duration summary
+                    console.log('\n📋 Track Summary:');
+                    const sortedTracks = Object.entries(titleDurations).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+                    sortedTracks.forEach(([track, duration]) => {
+                        let category = '';
+                        if (duration < 5) {
+                            category = ' (menu/extra)';
+                        } else if (duration > 60) {
+                            category = ' (full disc)';
+                        } else if (duration >= 20 && duration <= 35) {
+                            category = ' (episode)';
+                        }
+                        console.log(`   Track ${track}: ${duration} min${category}`);
+                    });
+                    console.log('');
+
+                    // Cache the title information with volume name and durations
+                    fs.writeFileSync(cacheFilePath, JSON.stringify({ 
+                        volumeName, 
+                        numTitles,
+                        titleDurations,
+                        scannedAt: new Date().toISOString()
+                    }, null, 2));
+                    
                     if (options.verbose) {
-                        console.log(`Cache created with Volume Name: ${volumeName} and Number of Titles: ${numTitles}`);
+                        console.log(`Cache created with Volume Name: ${volumeName}, Titles: ${numTitles}`);
+                        console.log(`Title durations:`, titleDurations);
                     }
                     resolve(numTitles);
                 } else {
@@ -556,6 +628,42 @@ async function getNumberOfTitles() {
 }
 
 // Clear cache if the volume name changes (will be checked in getNumberOfTitles)
+
+// Helper function to categorize track by duration
+function categorizeTrack(duration) {
+    if (duration < 2) {
+        return 'menu';
+    } else if (duration < 10) {
+        return 'extra';
+    } else if (duration >= 20 && duration <= 45) {
+        return 'episode';
+    } else if (duration > 90) {
+        return 'full_disc';
+    } else {
+        return 'unknown';
+    }
+}
+
+// Helper function to get video duration in minutes
+function getVideoDuration(filePath) {
+    try {
+        const result = spawnSync('ffprobe', [
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            filePath
+        ]);
+        if (result.status === 0) {
+            const seconds = parseFloat(result.stdout.toString().trim());
+            return Math.round(seconds / 60); // Return duration in minutes
+        }
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`Error getting duration for ${filePath}: ${error.message}`);
+        }
+    }
+    return null;
+}
 
 async function renameExistingFiles() {
     try {
@@ -581,20 +689,77 @@ async function renameExistingFiles() {
         console.log('━'.repeat(60));
         console.log('');
         
+        // Load DVD title durations from cache if available
+        const cacheFilePath = getCacheFilePath();
+        let dvdTitleDurations = null;
+        if (fs.existsSync(cacheFilePath)) {
+            try {
+                const cacheData = JSON.parse(fs.readFileSync(cacheFilePath));
+                if (cacheData.volumeName === volumeName && cacheData.titleDurations) {
+                    dvdTitleDurations = cacheData.titleDurations;
+                    console.log(`💿 Using DVD track durations from disc scan\n`);
+                    if (options.verbose) {
+                        console.log('DVD title durations:', dvdTitleDurations);
+                    }
+                }
+            } catch (error) {
+                if (options.verbose) {
+                    console.log(`Could not load cache: ${error.message}`);
+                }
+            }
+        }
+        
         // Find existing files in output directory
-        const existingFiles = fs.readdirSync(options.outputDir)
+        const allFiles = fs.readdirSync(options.outputDir)
             .filter(f => f.endsWith('.mp4') && !f.startsWith('.'))
             .sort();
         
-        if (existingFiles.length === 0) {
+        if (allFiles.length === 0) {
             console.log('❌ No MP4 files found in output directory\n');
             return;
         }
         
-        console.log(`📂 Found ${existingFiles.length} file(s) to rename\n`);
+        console.log(`📂 Analyzing ${allFiles.length} file(s)...\n`);
         
-        // Use file count as numTitles for metadata lookup
-        const numTitles = existingFiles.length;
+        // Get duration for each file
+        const filesWithDuration = allFiles.map((f, index) => {
+            const filePath = path.join(options.outputDir, f);
+            const duration = getVideoDuration(filePath);
+            const stats = fs.statSync(filePath);
+            
+            // Try to extract track number from filename (e.g., LOOK_AROUND_YOU_3.mp4 -> track 3)
+            let trackNumber = null;
+            const trackMatch = f.match(/_([\d]+)\.mp4$/);
+            if (trackMatch) {
+                trackNumber = parseInt(trackMatch[1], 10);
+            }
+            
+            // Get DVD duration if available
+            let dvdDuration = null;
+            if (dvdTitleDurations && trackNumber && dvdTitleDurations[trackNumber]) {
+                dvdDuration = dvdTitleDurations[trackNumber];
+            }
+            
+            return { 
+                name: f, 
+                duration, 
+                dvdDuration,
+                trackNumber,
+                size: stats.size, 
+                path: filePath 
+            };
+        }).filter(f => f.duration !== null);
+        
+        // Sort by filename to maintain track order
+        filesWithDuration.sort((a, b) => {
+            if (a.trackNumber && b.trackNumber) {
+                return a.trackNumber - b.trackNumber;
+            }
+            return a.name.localeCompare(b.name);
+        });
+        
+        // Use file count as numTitles for metadata lookup (use total count for better type detection)
+        const numTitles = filesWithDuration.length;
         
         let metadata = null;
         if (!options.noLookup) {
@@ -602,6 +767,56 @@ async function renameExistingFiles() {
         } else {
             metadata = { type: 'disc', volumeName };
         }
+        
+        // Now filter files based on metadata
+        let episodeFiles = [];
+        let extraFiles = [];
+        
+        if (metadata.type === 'tv' && metadata.episodes) {
+            // For TV shows with episode data, use expected runtime to filter
+            const expectedCount = metadata.episodes.length;
+            const avgRuntime = metadata.episodes.reduce((sum, ep) => sum + (ep.runtime || 25), 0) / expectedCount;
+            const minRuntime = Math.max(5, avgRuntime * 0.7); // 70% of average runtime
+            const maxRuntime = Math.min(60, avgRuntime * 1.5); // 150% of average runtime
+            
+            console.log(`📺 Expected ${expectedCount} episodes (~${Math.round(avgRuntime)} min each)\n`);
+            log(`Expected runtime range: ${Math.round(minRuntime)}-${Math.round(maxRuntime)} minutes`);
+            
+            // Filter by runtime and take only expected count
+            const candidateFiles = filesWithDuration.filter(f => f.duration >= minRuntime && f.duration <= maxRuntime);
+            episodeFiles = candidateFiles.slice(0, expectedCount);
+            extraFiles = filesWithDuration.filter(f => !episodeFiles.includes(f));
+        } else {
+            // For movies or when no episode data, use simple filtering
+            episodeFiles = filesWithDuration.filter(f => f.duration >= 5 && f.duration <= 60);
+            extraFiles = filesWithDuration.filter(f => f.duration < 5 || f.duration > 60);
+        }
+        
+        if (extraFiles.length > 0) {
+            console.log('📌 Skipping non-episode files:');
+            extraFiles.forEach(f => {
+                let reason;
+                if (f.duration < 5) {
+                    reason = 'too short (likely menu/extra)';
+                } else if (f.duration > 60) {
+                    reason = 'too long (likely full disc rip)';
+                } else {
+                    reason = 'does not match expected episode runtime';
+                }
+                console.log(`   ⏭  ${f.name} (${f.duration} min - ${reason})`);
+                log(`Skipping ${f.name}: ${f.duration} min (${reason})`);
+            });
+            console.log('');
+        }
+        
+        const existingFiles = episodeFiles.map(f => f.name);
+        
+        if (existingFiles.length === 0) {
+            console.log('❌ No valid episode files found\n');
+            return;
+        }
+        
+        console.log(`✓ Found ${existingFiles.length} episode file(s) to rename\n`);
         
         const logFilePath = initializeLog(options.outputDir, volumeName);
         log(`Rename mode - Metadata: ${JSON.stringify(metadata)}`);
@@ -647,6 +862,10 @@ async function renameExistingFiles() {
             if (oldFile === newFileName) {
                 console.log(`  ⏭  ${oldFile} (unchanged)`);
                 log(`File unchanged: ${oldFile}`);
+            } else if (fs.existsSync(newPath) && oldPath !== newPath) {
+                console.log(`  ⚠️  ${oldFile}`);
+                console.log(`    → ${newFileName} (target exists, skipping to prevent overwrite)`);
+                log(`Skipped rename ${oldFile} -> ${newFileName}: target file already exists`);
             } else {
                 try {
                     fs.renameSync(oldPath, newPath);
@@ -714,7 +933,50 @@ async function ripAllTracks() {
             metadata = { type: 'disc', volumeName };
         }
         
+        // If scan-only mode, display metadata and exit
+        if (options.scanOnly) {
+            console.log('\n' + '━'.repeat(60));
+            console.log('  📋 Metadata Summary');
+            console.log('━'.repeat(60));
+            if (metadata.type === 'tv') {
+                console.log(`  Type:    TV Show`);
+                console.log(`  Title:   ${metadata.name}`);
+                console.log(`  Season:  ${metadata.season}`);
+                if (metadata.episodes) {
+                    console.log(`  Episodes: ${metadata.episodes.length}`);
+                    console.log('');
+                    console.log('  Episode List:');
+                    metadata.episodes.forEach((ep, i) => {
+                        console.log(`    ${i + 1}. S${String(metadata.season).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')} - ${ep.name} (${ep.runtime} min)`);
+                    });
+                }
+            } else if (metadata.type === 'movie') {
+                console.log(`  Type:  Movie`);
+                console.log(`  Title: ${metadata.name}`);
+                if (metadata.year) {
+                    console.log(`  Year:  ${metadata.year}`);
+                }
+            } else {
+                console.log(`  Type:  Using disc name`);
+                console.log(`  Title: ${metadata.volumeName || volumeName}`);
+            }
+            console.log('━'.repeat(60));
+            console.log('');
+            console.log('✅ Scan complete. Run without --scan-only to start ripping.');
+            console.log('');
+            return;
+        }
+        
         logFilePath = initializeLog(options.outputDir, volumeName); // Initialize the log
+        
+        // Log DVD track durations if available
+        if (global.dvdTitleDurations) {
+            log('DVD Track Durations:');
+            Object.entries(global.dvdTitleDurations).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([track, duration]) => {
+                log(`  Track ${track}: ${duration} minutes`);
+            });
+        }
+        
         log(`Metadata: ${JSON.stringify(metadata)}`);
         
         // Determine base file name based on metadata
@@ -731,6 +993,10 @@ async function ripAllTracks() {
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
             let outputFileName;
             
+            // Get track duration for categorization
+            const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
+            const category = trackDuration ? categorizeTrack(trackDuration) : null;
+            
             // Generate filename based on metadata type
             if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[titleNumber - 1]) {
                 const episode = metadata.episodes[titleNumber - 1];
@@ -742,10 +1008,22 @@ async function ripAllTracks() {
                 const seasonNum = String(metadata.season).padStart(2, '0');
                 const episodeNum = String(titleNumber).padStart(2, '0');
                 outputFileName = `${baseFileName}_S${seasonNum}E${episodeNum}`;
-            } else if (numTitles === 1) {
-                outputFileName = baseFileName;
+            } else if (metadata.type === 'movie') {
+                // For movies, use category labels
+                if (category && category !== 'episode') {
+                    outputFileName = numTitles === 1 ? baseFileName : `${baseFileName}_${titleNumber}_${category}`;
+                } else {
+                    outputFileName = numTitles === 1 ? baseFileName : `${baseFileName}_${titleNumber}`;
+                }
             } else {
-                outputFileName = `${baseFileName}_${titleNumber}`;
+                // For disc name fallback, always include category
+                if (numTitles === 1) {
+                    outputFileName = baseFileName;
+                } else if (category) {
+                    outputFileName = `${baseFileName}_${titleNumber}_${category}`;
+                } else {
+                    outputFileName = `${baseFileName}_${titleNumber}`;
+                }
             }
 
             console.log(`  ⚙️  Track ${titleNumber} of ${numTitles}: ${outputFileName}`);
@@ -844,6 +1122,7 @@ Options:
   --no-deinterlace  Disable deinterlacing
   --no-lookup       Skip online metadata lookup
   --rename-only     Only rename existing files using metadata (no ripping)
+  --scan-only       Scan disc and show metadata without ripping
   --subtitles       Specify the subtitle track number (default: 1)
   --sub-lang        Specify the subtitle language code (default: eng)
   --verbose         Show detailed technical output
