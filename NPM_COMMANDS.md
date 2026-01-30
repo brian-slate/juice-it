@@ -25,6 +25,12 @@ Launches an interactive demo of the episode mapping feature. Creates mock DVD tr
 
 ## Development
 
+### Update Homebrew Installation
+```bash
+./bin/update-homebrew.sh
+```
+After committing changes, run this to update your local Homebrew installation for testing.
+
 ### Create Release Tarball
 ```bash
 npm run create-tarball
