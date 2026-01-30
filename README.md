@@ -1,20 +1,40 @@
-# Juice It
+# JuiceIt 🎬
 
-A script to rip DVDs using HandBrakeCLI.
+A smart DVD ripper with automatic metadata lookup and episode naming. Rip entire TV series or movies with intelligent track detection, TMDB metadata integration, and interactive episode mapping.
 
 ## Features
 
-- Easily rip DVDs to digital formats.
-- Supports various encoding options.
-- Caches DVD information for faster subsequent rips.
+- 🔍 **Auto DVD Detection** - Automatically detects inserted DVDs
+- 📺 **Smart Metadata Lookup** - Fetches TV show and movie info from TMDB
+- 📋 **Episode Naming** - Automatically names episodes (e.g., `S01E01_Episode_Title.mp4`)
+- 🎯 **Track Categorization** - Identifies menus, extras, episodes, and full disc rips
+- 💾 **Intelligent Caching** - Remembers disc info for faster re-rips
+- 🎨 **Beautiful Progress UI** - Real-time progress bars with time estimates
+- 🔄 **Interactive Mapping** - Review and adjust episode assignments before finalizing
+- 📦 **Homebrew Installation** - Install globally with `brew install`
 
-## Prerequisites
+## Installation
 
-Before using this tool, ensure you have the following installed:
+### Via Homebrew (Recommended)
 
-- [Node.js](https://nodejs.org/) (version 12 or higher)
-- [HandBrakeCLI](https://handbrake.fr/)
-- [libdvdcss](https://www.videolan.org/developers/libdvdcss/)
+```bash
+brew tap brian-slate/juiceit
+brew install juiceit
+```
+
+### Manual Installation
+
+**Prerequisites:**
+- [Node.js](https://nodejs.org/) v14 or higher
+- [HandBrakeCLI](https://handbrake.fr/) - `brew install handbrake`
+- [libdvdcss](https://www.videolan.org/developers/libdvdcss/) - `brew install libdvdcss`
+- [ffmpeg](https://ffmpeg.org/) - `brew install ffmpeg`
+
+```bash
+git clone https://github.com/brian-slate/juice-it.git
+cd juice-it
+npm install
+```
 
 ## Installation
 
@@ -39,13 +59,55 @@ Before using this tool, ensure you have the following installed:
 
 ## Usage
 
-To use the tool, run the following command:
+### Basic Usage (Auto-detection)
+
+Simply insert a DVD and run:
 
 ```bash
-juiceit --dvdSource /dev/disk5 --output ./output-directory
+juiceit
 ```
 
-Replace `/dev/disk5` with the path to your DVD drive and `./output-directory` with your desired output directory.
+JuiceIt will:
+1. Auto-detect the DVD
+2. Scan all tracks and durations
+3. Look up metadata from TMDB
+4. Let you select the correct show/movie
+5. Rip all tracks with proper names
+6. Show interactive mapping for episode assignment
+
+### Command Line Options
+
+```bash
+juiceit [options]
+
+Options:
+  --help              Show help message
+  --output DIR        Output directory (default: <disc_name>_<date>)
+  --dvdSource PATH    DVD device path (auto-detected if omitted)
+  --quality N         Encoding quality 0-51 (default: 20)
+  --no-deinterlace    Disable deinterlacing
+  --no-lookup         Skip metadata lookup, use disc name
+  --scan-only         Scan disc and show metadata without ripping
+  --rename-only       Rename existing files using metadata
+  --verbose           Show detailed HandBrakeCLI output
+```
+
+### Examples
+
+**Scan a disc without ripping:**
+```bash
+juiceit --scan-only
+```
+
+**Skip metadata lookup:**
+```bash
+juiceit --no-lookup
+```
+
+**Rename previously ripped files:**
+```bash
+juiceit --rename-only --output ./my_ripped_dvd/
+```
 
 ## Creating a Release
 
@@ -71,15 +133,36 @@ To create a new release of the tool, follow these steps:
    git push --follow-tags
    ```
 
+## Legal Disclaimer
+
+⚠️ **Important:** This tool is intended for **personal use only** to create backup copies of DVDs you legally own.
+
+- DVD decryption legality varies by country and jurisdiction
+- In the US, circumventing DVD CSS encryption may violate the DMCA
+- Users are solely responsible for ensuring their use complies with local laws
+- The authors assume no liability for misuse of this software
+
+**You must own the physical DVD to legally rip it in most jurisdictions.**
+
+## TMDB Attribution
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+<img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" width="100">
+
+Metadata provided by [The Movie Database (TMDB)](https://www.themoviedb.org/).
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
+Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Acknowledgments
 
-- [HandBrake](https://handbrake.fr/) for the video transcoding library.
-- [libdvdcss](https://www.videolan.org/developers/libdvdcss/) for DVD decryption support.
+- [HandBrake](https://handbrake.fr/) - Video transcoding
+- [libdvdcss](https://www.videolan.org/developers/libdvdcss/) - DVD decryption
+- [TMDB](https://www.themoviedb.org/) - Metadata API
+- [FFmpeg](https://ffmpeg.org/) - Video analysis

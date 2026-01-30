@@ -1,2 +1,26 @@
-node_modules
+# Node
+node_modules/
+npm-debug.log
+
+# Output directories (test rips)
+*_20*-*-*/
+*.mp4
+*.log
+
+# macOS
+.DS_Store
 **/.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
