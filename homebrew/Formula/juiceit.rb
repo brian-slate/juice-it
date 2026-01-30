@@ -1,8 +1,8 @@
 class Juiceit < Formula
   desc "Smart DVD ripper with automatic metadata lookup and episode naming"
   homepage "https://github.com/brian-slate/juice-it"
-  url "https://github.com/brian-slate/juice-it/releases/download/v1.0.11/juice-it-v1.0.11.tar.gz"
-  sha256 "0cbf1ce078f126894b7ec3d254ba644de0dd3a1a915f97adb48c011eeaaedcde"
+  url "file:///Users/brianslate/code/personal/juice-it", using: :git, branch: "improve-output-ui"
+  version "1.0.11-dev"
   license "MIT"
 
   depends_on "node"
