@@ -335,6 +335,43 @@ function setDefaultOutputDir(volumeName) {
     }
 }
 
+// Clean up old cache files, keeping only the most recent N files
+function cleanupOldCacheFiles(cacheDir, maxFiles = 10) {
+    try {
+        if (!fs.existsSync(cacheDir)) return;
+        
+        const files = fs.readdirSync(cacheDir)
+            .filter(f => f.endsWith('.json'))
+            .map(f => ({
+                name: f,
+                path: path.join(cacheDir, f),
+                mtime: fs.statSync(path.join(cacheDir, f)).mtime.getTime()
+            }))
+            .sort((a, b) => b.mtime - a.mtime); // Sort by most recent first
+        
+        // Delete files beyond maxFiles
+        if (files.length > maxFiles) {
+            const filesToDelete = files.slice(maxFiles);
+            filesToDelete.forEach(file => {
+                try {
+                    fs.unlinkSync(file.path);
+                    if (options.verbose) {
+                        console.log(`Cleaned up old cache: ${file.name}`);
+                    }
+                } catch (err) {
+                    if (options.verbose) {
+                        console.log(`Could not delete cache file ${file.name}: ${err.message}`);
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`Error cleaning up cache: ${error.message}`);
+        }
+    }
+}
+
 // Cache file path will be set dynamically
 function getCacheFilePath() {
     // Use system cache directory instead of polluting output folder
@@ -356,6 +393,9 @@ function getCacheFilePath() {
     if (!fs.existsSync(cacheDir)) {
         fs.mkdirSync(cacheDir, { recursive: true });
     }
+    
+    // Clean up old cache files (keep last 10)
+    cleanupOldCacheFiles(cacheDir, 10);
     
     // Use volume name in cache filename to support multiple discs
     const volumeName = getVolumeName();
@@ -1142,8 +1182,9 @@ async function ripAllTracks() {
                     process.stdout.write(`\r      ${progressBar} | ${elapsedStr} elapsed | ~${remainingStr} remaining`);
                 });
 
-                // Move to the next line and show completion
-                console.log(`\r      ${createProgressBar(100)} | Complete!`);
+                // Clear the progress line and show completion
+                process.stdout.write('\r' + ' '.repeat(100) + '\r');
+                console.log(`      ${createProgressBar(100)} | Complete!`);
                 const relativePath = path.relative(process.cwd(), path.join(options.outputDir, `${outputFileName}.mp4`));
                 console.log(`      ✓ Saved to ${relativePath}`);
                 console.log('');
