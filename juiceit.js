@@ -31,6 +31,8 @@ const { execSync, spawn, spawnSync } = require('child_process'); // Ensure spawn
 const pty = require('node-pty');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
+const { Select, Input } = require('enquirer');
 
 // ==================== LOGGING ====================
 
@@ -63,6 +65,174 @@ function closeLog() {
         log('='.repeat(70));
         log(`Finished: ${new Date().toISOString()}`);
         logStream.end();
+    }
+}
+
+// ==================== METADATA LOOKUP ====================
+
+const TMDB_API_KEY = 'REMOVED_API_KEY'; // Read-only demo key
+
+async function searchTMDB(query, isTV = false) {
+    try {
+        const endpoint = isTV ? 'search/tv' : 'search/movie';
+        const response = await axios.get(`https://api.themoviedb.org/3/${endpoint}`, {
+            params: {
+                api_key: TMDB_API_KEY,
+                query: query,
+                language: 'en-US'
+            }
+        });
+        return response.data.results || [];
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`Error searching TMDB: ${error.message}`);
+        }
+        return [];
+    }
+}
+
+async function getTVSeasonDetails(tvId, seasonNumber) {
+    try {
+        const response = await axios.get(`https://api.themoviedb.org/3/tv/${tvId}/season/${seasonNumber}`, {
+            params: {
+                api_key: TMDB_API_KEY,
+                language: 'en-US'
+            }
+        });
+        return response.data;
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`Error fetching season details: ${error.message}`);
+        }
+        return null;
+    }
+}
+
+function guessMediaType(numTitles) {
+    // If there are multiple titles (usually 2+), it's likely a TV show
+    // Movies typically have 1-2 titles (feature + extras)
+    return numTitles >= 3 ? 'tv' : 'movie';
+}
+
+async function lookupMetadata(volumeName, numTitles) {
+    console.log('\n🔍 Looking up metadata...');
+    
+    // Clean up the volume name for searching
+    const cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').trim();
+    const mediaType = guessMediaType(numTitles);
+    
+    log(`Searching for: "${cleanName}" (guessing type: ${mediaType})`);
+    
+    // Search both movie and TV
+    const movieResults = await searchTMDB(cleanName, false);
+    const tvResults = await searchTMDB(cleanName, true);
+    
+    const choices = [];
+    
+    // Add TV results first if we think it's a TV show
+    if (mediaType === 'tv') {
+        tvResults.slice(0, 5).forEach(show => {
+            const year = show.first_air_date ? `(${show.first_air_date.split('-')[0]})` : '';
+            choices.push({
+                name: `TV: ${show.name} ${year}`,
+                value: { type: 'tv', data: show },
+                hint: show.overview ? show.overview.substring(0, 80) + '...' : ''
+            });
+        });
+        movieResults.slice(0, 3).forEach(movie => {
+            const year = movie.release_date ? `(${movie.release_date.split('-')[0]})` : '';
+            choices.push({
+                name: `Movie: ${movie.title} ${year}`,
+                value: { type: 'movie', data: movie },
+                hint: movie.overview ? movie.overview.substring(0, 80) + '...' : ''
+            });
+        });
+    } else {
+        movieResults.slice(0, 5).forEach(movie => {
+            const year = movie.release_date ? `(${movie.release_date.split('-')[0]})` : '';
+            choices.push({
+                name: `Movie: ${movie.title} ${year}`,
+                value: { type: 'movie', data: movie },
+                hint: movie.overview ? movie.overview.substring(0, 80) + '...' : ''
+            });
+        });
+        tvResults.slice(0, 3).forEach(show => {
+            const year = show.first_air_date ? `(${show.first_air_date.split('-')[0]})` : '';
+            choices.push({
+                name: `TV: ${show.name} ${year}`,
+                value: { type: 'tv', data: show },
+                hint: show.overview ? show.overview.substring(0, 80) + '...' : ''
+            });
+        });
+    }
+    
+    // Add options for manual entry and using disc name
+    choices.push({ name: 'Enter custom name/prefix', value: { type: 'custom' } });
+    choices.push({ name: `Use disc name: "${volumeName}"`, value: { type: 'disc' } });
+    
+    if (choices.length === 2) {
+        // No results found
+        console.log('⚠️  No metadata found online\n');
+        log('No metadata found');
+        return { type: 'disc', volumeName };
+    }
+    
+    try {
+        const prompt = new Select({
+            name: 'media',
+            message: 'Select the correct match:',
+            choices: choices,
+            result(name) {
+                return this.focused.value;
+            }
+        });
+        
+        const selected = await prompt.run();
+        log(`User selected: ${JSON.stringify(selected)}`);
+        
+        if (selected.type === 'custom') {
+            const namePrompt = new Input({
+                message: 'Enter name or prefix for episodes:',
+                initial: cleanName
+            });
+            const customName = await namePrompt.run();
+            log(`User entered custom name: ${customName}`);
+            return { type: 'custom', name: customName };
+        } else if (selected.type === 'disc') {
+            return { type: 'disc', volumeName };
+        } else if (selected.type === 'tv') {
+            // For TV shows, ask about season
+            const seasonPrompt = new Input({
+                message: 'Enter season number (default: 1):',
+                initial: '1',
+                validate(value) {
+                    return /^\d+$/.test(value) || 'Please enter a valid number';
+                }
+            });
+            const season = parseInt(await seasonPrompt.run());
+            log(`User selected season: ${season}`);
+            
+            // Fetch episode details
+            const seasonDetails = await getTVSeasonDetails(selected.data.id, season);
+            
+            return {
+                type: 'tv',
+                name: selected.data.name,
+                season: season,
+                episodes: seasonDetails ? seasonDetails.episodes : null
+            };
+        } else {
+            return {
+                type: 'movie',
+                name: selected.data.title,
+                year: selected.data.release_date ? selected.data.release_date.split('-')[0] : null
+            };
+        }
+    } catch (error) {
+        // User cancelled or error occurred
+        console.log('\nUsing disc name as fallback\n');
+        log('User cancelled selection or error occurred');
+        return { type: 'disc', volumeName };
     }
 }
 
@@ -99,7 +269,7 @@ function printBanner(volumeName) {
     console.log('  🎬  JuiceIt DVD Ripper');
     console.log('━'.repeat(60));
     console.log(`  DVD:     "${volumeName}"`);
-    console.log(`  Output:  ${path.basename(options.outputDir)}/`);
+    console.log(`  Output:  ${options.outputDir}/`);
     console.log(`  Quality: HQ 1080p30 (CRF ${options.encoding.quality})`);
     console.log('━'.repeat(60));
     console.log('');
@@ -108,7 +278,7 @@ function printBanner(volumeName) {
 // Centralized argument processing
 const args = process.argv.slice(2);
 const options = {
-    outputDir: path.join(process.cwd(), 'output'), // Default to 'output' subdirectory
+    outputDir: null, // Will be set dynamically based on disc name + datestamp
     dvdSource: null, // Initialize dvdSource
     encoding: {
         encoder: 'x264', // Default encoder
@@ -140,18 +310,29 @@ args.forEach((arg, index) => {
         options.subtitles.language = args[index + 1]; // Set subtitle language from argument
     } else if (arg === '--verbose') {
         options.verbose = true; // Enable verbose output
+    } else if (arg === '--no-lookup') {
+        options.noLookup = true; // Skip metadata lookup
+    } else if (arg === '--rename-only') {
+        options.renameOnly = true; // Only rename existing files
     }
 });
 
-// Ensure the output directory exists
-if (!fs.existsSync(options.outputDir)) {
-    fs.mkdirSync(options.outputDir, { recursive: true });
+// Helper function to set default output directory
+function setDefaultOutputDir(volumeName) {
+    if (!options.outputDir) {
+        const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const safeName = volumeName.replace(/[^a-zA-Z0-9_-]/g, '_');
+        options.outputDir = path.join(process.cwd(), `${safeName}_${timestamp}`);
+    }
+    // Ensure the output directory exists
+    if (!fs.existsSync(options.outputDir)) {
+        fs.mkdirSync(options.outputDir, { recursive: true });
+    }
 }
 
-// Define the cache file path as a hidden file
-const cacheFilePath = path.join(options.outputDir, '.dvd_cache.json');
-if (options.verbose) {
-    console.log(`Cache file path: ${cacheFilePath}`);
+// Cache file path will be set dynamically in getNumberOfTitles
+function getCacheFilePath() {
+    return path.join(options.outputDir || process.cwd(), '.dvd_cache.json');
 }
 
 // Check if HandBrakeCLI is installed
@@ -297,9 +478,11 @@ function getVolumeName() {
 async function getNumberOfTitles() {
     process.stdout.write('🔍 Scanning disc...');
     const volumeName = getVolumeName(); // Get the current volume name
+    const cacheFilePath = getCacheFilePath();
 
     if (options.verbose) {
         console.log(`\nCurrent Volume Name: ${volumeName}`);
+        console.log(`Cache file path: ${cacheFilePath}`);
     }
 
     // Check if cache exists
@@ -372,14 +555,133 @@ async function getNumberOfTitles() {
     });
 }
 
-// Clear cache if the volume name changes
-if (fs.existsSync(cacheFilePath)) {
-    const cacheData = JSON.parse(fs.readFileSync(cacheFilePath));
-    const currentVolumeName = getVolumeName();
-    if (cacheData.volumeName !== currentVolumeName) {
-        fs.unlinkSync(cacheFilePath); // Clear the cache
-        if (options.verbose) {
-            console.log("Cache cleared due to volume name change.");
+// Clear cache if the volume name changes (will be checked in getNumberOfTitles)
+
+async function renameExistingFiles() {
+    try {
+        const volumeName = getVolumeName();
+        
+        // For rename-only mode, output directory must be specified
+        if (!options.outputDir) {
+            console.error('\n❌ Error: --output directory must be specified when using --rename-only\n');
+            return;
+        }
+        
+        if (!fs.existsSync(options.outputDir)) {
+            console.error(`\n❌ Error: Output directory "${options.outputDir}" does not exist\n`);
+            return;
+        }
+        
+        console.log('');
+        console.log('━'.repeat(60));
+        console.log('  🏷️  JuiceIt File Renamer');
+        console.log('━'.repeat(60));
+        console.log(`  DVD:     "${volumeName}"`);
+        console.log(`  Output:  ${options.outputDir}/`);
+        console.log('━'.repeat(60));
+        console.log('');
+        
+        // Find existing files in output directory
+        const existingFiles = fs.readdirSync(options.outputDir)
+            .filter(f => f.endsWith('.mp4') && !f.startsWith('.'))
+            .sort();
+        
+        if (existingFiles.length === 0) {
+            console.log('❌ No MP4 files found in output directory\n');
+            return;
+        }
+        
+        console.log(`📂 Found ${existingFiles.length} file(s) to rename\n`);
+        
+        // Use file count as numTitles for metadata lookup
+        const numTitles = existingFiles.length;
+        
+        let metadata = null;
+        if (!options.noLookup) {
+            metadata = await lookupMetadata(volumeName, numTitles);
+        } else {
+            metadata = { type: 'disc', volumeName };
+        }
+        
+        const logFilePath = initializeLog(options.outputDir, volumeName);
+        log(`Rename mode - Metadata: ${JSON.stringify(metadata)}`);
+        
+        // Determine base file name based on metadata
+        let baseFileName = volumeName;
+        if (metadata.type === 'tv') {
+            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        } else if (metadata.type === 'movie') {
+            const year = metadata.year ? `_${metadata.year}` : '';
+            baseFileName = `${metadata.name}${year}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        } else if (metadata.type === 'custom') {
+            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
+        
+        let renameCount = 0;
+        
+        for (let i = 0; i < existingFiles.length; i++) {
+            const oldFile = existingFiles[i];
+            const titleNumber = i + 1;
+            let newFileName;
+            
+            // Generate filename based on metadata type
+            if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[i]) {
+                const episode = metadata.episodes[i];
+                const seasonNum = String(metadata.season).padStart(2, '0');
+                const episodeNum = String(episode.episode_number).padStart(2, '0');
+                const episodeName = episode.name ? `_${episode.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+                newFileName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
+            } else if (metadata.type === 'tv') {
+                const seasonNum = String(metadata.season).padStart(2, '0');
+                const episodeNum = String(titleNumber).padStart(2, '0');
+                newFileName = `${baseFileName}_S${seasonNum}E${episodeNum}.mp4`;
+            } else if (numTitles === 1) {
+                newFileName = `${baseFileName}.mp4`;
+            } else {
+                newFileName = `${baseFileName}_${titleNumber}.mp4`;
+            }
+            
+            const oldPath = path.join(options.outputDir, oldFile);
+            const newPath = path.join(options.outputDir, newFileName);
+            
+            if (oldFile === newFileName) {
+                console.log(`  ⏭  ${oldFile} (unchanged)`);
+                log(`File unchanged: ${oldFile}`);
+            } else {
+                try {
+                    fs.renameSync(oldPath, newPath);
+                    console.log(`  ✓ ${oldFile}`);
+                    console.log(`    → ${newFileName}`);
+                    log(`Renamed: ${oldFile} -> ${newFileName}`);
+                    renameCount++;
+                } catch (error) {
+                    console.log(`  ❌ Failed to rename ${oldFile}: ${error.message}`);
+                    log(`Error renaming ${oldFile}: ${error.message}`);
+                }
+            }
+        }
+        
+        console.log('');
+        console.log('━'.repeat(60));
+        if (renameCount > 0) {
+            console.log(`  ⚡ Renamed ${renameCount} file(s) successfully!`);
+        } else {
+            console.log(`  ℹ️  No files needed renaming`);
+        }
+        console.log('━'.repeat(60));
+        
+        if (logFilePath) {
+            const relativeLogPath = path.relative(process.cwd(), logFilePath);
+            console.log(`  📄 Log: ${relativeLogPath}`);
+        }
+        console.log('');
+        
+        closeLog();
+    } catch (error) {
+        console.error(`\n❌ Error during renaming: ${error}\n`);
+        if (logStream) {
+            log(`Fatal error: ${error}`);
+            closeLog();
         }
     }
 }
@@ -390,22 +692,61 @@ async function ripAllTracks() {
     
     try {
         const volumeName = getVolumeName(); // Get the DVD volume name
-        printBanner(volumeName); // Show the banner
         
-        logFilePath = initializeLog(options.outputDir, volumeName); // Initialize the log
+        // Set default output directory before any operations
+        setDefaultOutputDir(volumeName);
+        
+        printBanner(volumeName); // Show the banner
 
         const numTitles = await getNumberOfTitles(); // Get the number of titles
-        const baseFileName = volumeName || 'Track'; // Use volume name or fallback to 'Track'
 
         if (numTitles === 0) {
             console.log('❌ No titles found on disc. Exiting.\n');
             log('No titles found on disc');
             return;
         }
+        
+        // Lookup metadata unless disabled
+        let metadata = null;
+        if (!options.noLookup) {
+            metadata = await lookupMetadata(volumeName, numTitles);
+        } else {
+            metadata = { type: 'disc', volumeName };
+        }
+        
+        logFilePath = initializeLog(options.outputDir, volumeName); // Initialize the log
+        log(`Metadata: ${JSON.stringify(metadata)}`);
+        
+        // Determine base file name based on metadata
+        let baseFileName = volumeName;
+        if (metadata.type === 'tv') {
+            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        } else if (metadata.type === 'movie') {
+            const year = metadata.year ? `_${metadata.year}` : '';
+            baseFileName = `${metadata.name}${year}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        } else if (metadata.type === 'custom') {
+            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
 
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
-            // If there's only one title, use just the volume name; otherwise append title number
-            const outputFileName = numTitles === 1 ? baseFileName : `${baseFileName}_${titleNumber}`;
+            let outputFileName;
+            
+            // Generate filename based on metadata type
+            if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[titleNumber - 1]) {
+                const episode = metadata.episodes[titleNumber - 1];
+                const seasonNum = String(metadata.season).padStart(2, '0');
+                const episodeNum = String(episode.episode_number).padStart(2, '0');
+                const episodeName = episode.name ? `_${episode.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+                outputFileName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}`;
+            } else if (metadata.type === 'tv') {
+                const seasonNum = String(metadata.season).padStart(2, '0');
+                const episodeNum = String(titleNumber).padStart(2, '0');
+                outputFileName = `${baseFileName}_S${seasonNum}E${episodeNum}`;
+            } else if (numTitles === 1) {
+                outputFileName = baseFileName;
+            } else {
+                outputFileName = `${baseFileName}_${titleNumber}`;
+            }
 
             console.log(`  ⚙️  Track ${titleNumber} of ${numTitles}: ${outputFileName}`);
 
@@ -420,7 +761,8 @@ async function ripAllTracks() {
 
                 // Move to the next line and show completion
                 console.log(`\r      ${createProgressBar(100)} | Complete!`);
-                console.log(`      ✓ Saved to output/${outputFileName}.mp4`);
+                const relativePath = path.relative(process.cwd(), path.join(options.outputDir, `${outputFileName}.mp4`));
+                console.log(`      ✓ Saved to ${relativePath}`);
                 console.log('');
                 successCount++;
             } catch (error) {
@@ -464,7 +806,8 @@ async function ripAllTracks() {
         console.log('━'.repeat(60));
         
         if (logFilePath) {
-            console.log(`  📄 Log: output/${path.basename(logFilePath)}`);
+            const relativeLogPath = path.relative(process.cwd(), logFilePath);
+            console.log(`  📄 Log: ${relativeLogPath}`);
         }
         console.log('');
         
@@ -480,8 +823,12 @@ async function ripAllTracks() {
     }
 }
 
-// Start the ripping process
-ripAllTracks();
+// Start the ripping or renaming process
+if (options.renameOnly) {
+    renameExistingFiles();
+} else {
+    ripAllTracks();
+}
 
 // Show help function
 function showHelp() {
@@ -490,18 +837,22 @@ Usage:
   node juiceit.js [options]
 
 Options:
-  --help        Show this help message
-  --output      Specify the output directory
-  --dvdSource   Specify the DVD source path (e.g., /dev/disk5)
-  --quality     Set the encoding quality (e.g., 20)
+  --help            Show this help message
+  --output          Specify the output directory (default: <disc_name>_<date>)
+  --dvdSource       Specify the DVD source path (e.g., /dev/disk5)
+  --quality         Set the encoding quality (e.g., 20)
   --no-deinterlace  Disable deinterlacing
-  --subtitles   Specify the subtitle track number (default: 1)
-  --sub-lang    Specify the subtitle language code (default: eng)
-  --verbose     Show detailed technical output
+  --no-lookup       Skip online metadata lookup
+  --rename-only     Only rename existing files using metadata (no ripping)
+  --subtitles       Specify the subtitle track number (default: 1)
+  --sub-lang        Specify the subtitle language code (default: eng)
+  --verbose         Show detailed technical output
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
   node juiceit.js --verbose  # Show detailed HandBrakeCLI output
+  node juiceit.js --no-lookup  # Skip metadata lookup and use disc name
+  node juiceit.js --rename-only --output ./output  # Rename existing files
 `);
 
 }

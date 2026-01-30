@@ -9,7 +9,9 @@
     "release": "npm run standard-version && bash ./bin/release.sh"
   },
   "dependencies": {
-    "node-pty": "^1.0.0"
+    "axios": "^1.13.4",
+    "enquirer": "^2.4.1",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "standard-version": "^9.3.2"
