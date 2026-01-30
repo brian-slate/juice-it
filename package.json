@@ -1,8 +1,11 @@
 {
   "name": "juice-it",
   "version": "1.0.11",
-  "description": "A script to rip DVDs using HandBrakeCLI",
+  "description": "Smart DVD ripper with automatic metadata lookup and episode naming",
   "main": "juiceit.js",
+  "bin": {
+    "juiceit": "./bin/juiceit"
+  },
   "scripts": {
     "create-tarball": "bash ./bin/create_tarball.sh $npm_package_version",
     "standard-version": "standard-version",

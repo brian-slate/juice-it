@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+
+// JuiceIt DVD Ripper - Executable Wrapper
+// This wrapper allows the tool to be installed globally via npm/brew
+
+const path = require('path');
+const mainScript = path.join(__dirname, '..', 'juiceit.js');
+
+require(mainScript);
