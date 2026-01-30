@@ -178,16 +178,17 @@ async function lookupMetadata(volumeName, numTitles) {
     }
     
     try {
-        // Use AutoComplete for searchable selection
-        const prompt = new AutoComplete({
+        // Use Select instead of AutoComplete to avoid regex issues with special characters
+        const prompt = new Select({
             name: 'media',
-            message: 'Select the correct match (type to search):',
-            limit: 10,
-            choices: choices.map(c => c.name),
+            message: 'Select the correct match:',
+            choices: choices.map(c => ({
+                name: c.name,
+                value: c.value,
+                hint: c.hint
+            })),
             result(name) {
-                // Find the choice that matches the selected name
-                const choice = choices.find(ch => ch.name === name);
-                return choice ? choice.value : null;
+                return this.focused.value;
             }
         });
         
