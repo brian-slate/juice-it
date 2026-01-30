@@ -383,40 +383,94 @@ function checkLibdvdcss() {
     }
 }
 
-// Function to detect the DVD source automatically
-function detectDvdSource() {
+// Function to detect all DVD drives
+function detectAllDvdDrives() {
     try {
-        const output = execSync('drutil status').toString();
-        const lines = output.split('\n');
-        for (const line of lines) {
-            if (line.includes('Type: DVD-ROM')) { // Check for DVD-ROM type
-                const parts = line.trim().split(/\s+/);
-                const diskIdentifier = parts[parts.length - 1]; // Extract the last part which is the device identifier
-                return diskIdentifier; // e.g., /dev/disk5
+        const diskListOutput = execSync('diskutil list').toString();
+        const drives = [];
+        
+        // Find all external physical disks
+        const diskMatches = diskListOutput.matchAll(/(\/dev\/disk\d+) \(external, physical\):[\s\S]*?TYPE NAME\s+SIZE\s+IDENTIFIER[\s\S]*?0:\s+(.+?)\s+(\d+\.\d+ [GMK]B)/g);
+        
+        for (const match of diskMatches) {
+            const device = match[1];
+            const name = match[2].trim();
+            const size = match[3];
+            
+            // Verify it's actually a DVD by checking size (DVDs are typically 4.7GB or 8.5GB)
+            const sizeNum = parseFloat(size);
+            const unit = size.match(/[GMK]B$/)[0];
+            
+            if (unit === 'GB' && sizeNum > 0 && sizeNum < 20) {
+                drives.push({ device, name, size });
             }
         }
+        
+        return drives;
     } catch (error) {
-        console.error("Error detecting DVD source:", error);
+        console.error("Error detecting DVD drives:", error);
+        return [];
     }
-    return null; // Return null if no DVD source is found
 }
 
-// Set dvdSource if not provided
-if (!options.dvdSource) {
-    options.dvdSource = detectDvdSource(); // Automatically detect DVD source
+// Function to detect the DVD source automatically
+async function detectDvdSource() {
+    const drives = detectAllDvdDrives();
+    
+    if (drives.length === 0) {
+        return null;
+    } else if (drives.length === 1) {
+        return drives[0].device;
+    } else {
+        // Multiple drives found - show interactive selection
+        console.log('\n📀 Multiple DVD drives detected:\n');
+        
+        const choices = drives.map(d => ({
+            name: `${d.device} - "${d.name}" (${d.size})`,
+            value: d.device
+        }));
+        
+        try {
+            const prompt = new Select({
+                name: 'drive',
+                message: 'Select DVD drive:',
+                choices: choices
+            });
+            
+            return await prompt.run();
+        } catch (error) {
+            console.log('\nSelection cancelled\n');
+            return null;
+        }
+    }
 }
 
-// Fallback if no DVD source is detected
-if (!options.dvdSource) {
-    console.error("No DVD source detected. Please provide a valid DVD source using --dvdSource.");
-    process.exit(1);
-}
-
-// Show help if requested
+// Show help if requested (do this before async operations)
 if (options.showHelp || args.length === 0) {
     showHelp();
     process.exit(0);
 }
+
+// Async initialization function
+(async () => {
+    // Set dvdSource if not provided
+    if (!options.dvdSource) {
+        options.dvdSource = await detectDvdSource(); // Automatically detect DVD source
+    }
+
+    // Fallback if no DVD source is detected
+    if (!options.dvdSource) {
+        console.error("No DVD source detected. Please provide a valid DVD source using --dvdSource.");
+        process.exit(1);
+    }
+
+    // Start the ripping or renaming process
+    if (options.renameOnly) {
+        await renameExistingFiles();
+    } else {
+        await ripAllTracks();
+    }
+})();
 
 // Function to rip DVD with progress output
 function ripDvd(titleNumber, outputFileName, trackNum, totalTracks, onProgress) {
@@ -1100,13 +1154,6 @@ async function ripAllTracks() {
     } finally {
         closeLog();
     }
-}
-
-// Start the ripping or renaming process
-if (options.renameOnly) {
-    renameExistingFiles();
-} else {
-    ripAllTracks();
 }
 
 // Show help function
