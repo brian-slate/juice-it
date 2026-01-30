@@ -384,7 +384,34 @@ function checkLibdvdcss() {
 // Function to detect all DVD drives
 function detectAllDvdDrives() {
     try {
-        const diskListOutput = execSync('diskutil list').toString();
+        // First, try drutil to detect DVD in drive
+        try {
+            const drutilOutput = execSync('drutil status 2>/dev/null').toString();
+            const deviceMatch = drutilOutput.match(/Name:\s+(\/dev\/disk\d+)/);
+            
+            if (deviceMatch) {
+                const device = deviceMatch[1];
+                // Get volume info from diskutil
+                try {
+                    const diskInfo = execSync(`diskutil info ${device} 2>/dev/null`).toString();
+                    const volumeMatch = diskInfo.match(/Volume Name:\s+(.+)/);
+                    const sizeMatch = diskInfo.match(/Disk Size:\s+([\d.]+\s+[GMK]B)/);
+                    
+                    const name = volumeMatch ? volumeMatch[1].trim() : 'DVD';
+                    const size = sizeMatch ? sizeMatch[1].trim() : 'Unknown';
+                    
+                    return [{ device, name, size }];
+                } catch (e) {
+                    // If diskutil fails, still return the device
+                    return [{ device, name: 'DVD', size: 'Unknown' }];
+                }
+            }
+        } catch (e) {
+            // drutil not available or no DVD, continue to fallback
+        }
+        
+        // Fallback: scan diskutil list for external disks
+        const diskListOutput = execSync('diskutil list 2>/dev/null').toString();
         const drives = [];
         
         // Find all external physical disks
@@ -406,7 +433,9 @@ function detectAllDvdDrives() {
         
         return drives;
     } catch (error) {
-        console.error("Error detecting DVD drives:", error);
+        if (options.verbose) {
+            console.error("Error detecting DVD drives:", error);
+        }
         return [];
     }
 }
@@ -598,6 +627,18 @@ async function getNumberOfTitles() {
         const handbrakeProcess = spawn('HandBrakeCLI', args);
 
         let output = '';
+        let progressDots = 0;
+        
+        // Show progress dots every 2 seconds
+        const progressInterval = setInterval(() => {
+            if (!options.verbose) {
+                process.stdout.write('.');
+                progressDots++;
+                if (progressDots % 20 === 0) {
+                    process.stdout.write('\n                    ');
+                }
+            }
+        }, 2000);
 
         handbrakeProcess.stdout.on('data', function(data) {
             const dataStr = data.toString();
@@ -611,16 +652,27 @@ async function getNumberOfTitles() {
             const dataStr = data.toString();
             if (options.verbose) {
                 process.stdout.write(dataStr);
+            } else {
+                // Show progress when HandBrake outputs title info
+                if (dataStr.includes('+ title')) {
+                    clearInterval(progressInterval);
+                    process.stdout.write(' parsing tracks');
+                    progressDots = 0;
+                }
             }
             output += dataStr;
         });
 
         handbrakeProcess.on('close', (exitCode) => {
+            clearInterval(progressInterval);
             if (exitCode === 0) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
                     const numTitles = parseInt(match[1], 10);
-                    console.log(` ✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
+                    if (!options.verbose && progressDots > 0) {
+                        process.stdout.write(' ');
+                    }
+                    console.log(`✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
                     console.log('');
 
                     // Parse title durations from HandBrakeCLI output
