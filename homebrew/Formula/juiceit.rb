@@ -24,6 +24,24 @@ class Juiceit < Formula
     EOS
   end
 
+  def caveats
+    <<~EOS
+      🎬 JuiceIt installed successfully!
+      
+      📋 Next Steps:
+      1. Get a free TMDB API key:
+         https://www.themoviedb.org/settings/api
+      
+      2. Run setup:
+         juiceit --setup
+      
+      3. Insert a DVD and run:
+         juiceit
+      
+      For help: juiceit --help
+    EOS
+  end
+
   test do
     system "#{bin}/juiceit", "--help"
   end

@@ -36,7 +36,30 @@ cd juice-it
 npm install
 ```
 
-## Installation
+## Setup
+
+After installation, configure your TMDB API key:
+
+1. **Get a free API key** from [TMDB](https://www.themoviedb.org/settings/api)
+   - Sign up at https://www.themoviedb.org/signup
+   - Go to Settings → API
+   - Request API key (select "Developer")
+   - Copy your "API Key (v3 auth)"
+
+2. **Run setup:**
+   ```bash
+   juiceit --setup
+   ```
+
+3. **Start ripping!**
+   ```bash
+   juiceit
+   ```
+
+> **Note:** JuiceIt includes a demo API key for testing, but it's rate-limited. 
+> We recommend getting your own free key for best performance.
+
+## Installation (Old)
 
 1. Clone the repository:
 
@@ -82,6 +105,7 @@ juiceit [options]
 
 Options:
   --help              Show help message
+  --setup             Configure TMDB API key
   --output DIR        Output directory (default: <disc_name>_<date>)
   --dvdSource PATH    DVD device path (auto-detected if omitted)
   --quality N         Encoding quality 0-51 (default: 20)
