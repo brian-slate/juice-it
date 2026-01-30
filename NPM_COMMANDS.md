@@ -25,11 +25,22 @@ Launches an interactive demo of the episode mapping feature. Creates mock DVD tr
 
 ## Development
 
-### Update Homebrew Installation
+### Quick Test (One-Liner)
+```bash
+./bin/quick-test.sh "Your commit message"
+```
+Commits your changes AND updates Homebrew installation in one command. Perfect for rapid testing!
+
+**Example:**
+```bash
+./bin/quick-test.sh "Fix episode naming bug"
+```
+
+### Update Homebrew Installation (Manual)
 ```bash
 ./bin/update-homebrew.sh
 ```
-After committing changes, run this to update your local Homebrew installation for testing.
+After committing changes manually, run this to update your local Homebrew installation for testing.
 
 ### Create Release Tarball
 ```bash

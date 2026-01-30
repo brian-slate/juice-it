@@ -180,6 +180,42 @@ Metadata provided by [The Movie Database (TMDB)](https://www.themoviedb.org/).
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
+## Development
+
+Contributing to JuiceIt? Here's how to test your changes:
+
+### Quick Development Workflow
+
+```bash
+# Make your changes to the code, then:
+./bin/quick-test.sh "Your commit message"
+
+# This will:
+# 1. Commit your changes
+# 2. Update your Homebrew installation
+# 3. Make juiceit command ready to test
+```
+
+### Testing
+
+```bash
+# Run automated tests
+npm test
+
+# Try the interactive demo
+npm run demo
+
+# Test with a real DVD
+juiceit --scan-only
+```
+
+### Documentation
+
+- `NPM_COMMANDS.md` - All npm scripts and testing commands
+- `HOMEBREW_DISTRIBUTION.md` - Guide for publishing to Homebrew
+- `COMPLETION_SUMMARY.md` - Implementation details
+- `IMPLEMENTATION_PLAN_*.md` - Feature specifications
+
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request.
