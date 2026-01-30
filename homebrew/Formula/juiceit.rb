@@ -11,14 +11,17 @@ class Juiceit < Formula
   depends_on "ffmpeg"  # For ffprobe to check video durations
 
   def install
-    # Install npm dependencies
-    system "npm", "install", "--production", "--ignore-scripts"
-    
-    # Install all files to libexec
+    # Install all files to libexec first
     libexec.install Dir["*"]
     
-    # Symlink the executable
-    bin.install_symlink libexec/"bin/juiceit"
+    # Install npm dependencies in libexec
+    system "npm", "install", "--production", "--prefix", libexec
+    
+    # Create wrapper script that uses node
+    (bin/"juiceit").write <<~EOS
+      #!/bin/bash
+      exec "#{Formula["node"].opt_bin}/node" "#{libexec}/juiceit.js" "$@"
+    EOS
   end
 
   test do

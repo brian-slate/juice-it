@@ -23,12 +23,10 @@
  * Requirements:
  *   - Node.js
  *   - HandBrakeCLI
- *   - node-pty
  *   - libdvdcss (for encrypted DVDs)
  */
 
 const { execSync, spawn, spawnSync } = require('child_process'); // Ensure spawn is imported
-const pty = require('node-pty');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
