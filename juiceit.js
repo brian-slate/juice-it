@@ -473,7 +473,7 @@ async function detectDvdSource() {
 }
 
 // Show help if requested (do this before async operations)
-if (options.showHelp || args.length === 0) {
+if (options.showHelp) {
     showHelp();
     process.exit(0);
 }
