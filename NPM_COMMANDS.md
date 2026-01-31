@@ -25,22 +25,42 @@ Launches an interactive demo of the episode mapping feature. Creates mock DVD tr
 
 ## Development
 
-### Quick Test (One-Liner)
-```bash
-./bin/quick-test.sh "Your commit message"
-```
-Commits your changes AND updates Homebrew installation in one command. Perfect for rapid testing!
+### Local Testing Workflow
 
-**Example:**
+1. Make code changes
+2. Commit your changes:
+   ```bash
+   git add -A
+   git commit -m "Your message"
+   ```
+3. Update Homebrew installation:
+   ```bash
+   ./bin/update-homebrew.sh
+   ```
+4. Test with `juiceit` command
+
+### Create a Release
+
+See `RELEASE.md` for complete guide.
+
+**Quick version:**
 ```bash
-./bin/quick-test.sh "Fix episode naming bug"
+# 1. Bump version in package.json
+# 2. Commit and tag
+git add package.json
+git commit -m "Bump version to 1.1.0"
+git tag -a v1.1.0 -m "Release v1.1.0"
+git push origin improve-output-ui
+git push origin v1.1.0
+
+# 3. Create GitHub release
+# 4. Update Homebrew formula with new URL and SHA256
 ```
 
-### Update Homebrew Installation (Manual)
+Or use the automated script:
 ```bash
-./bin/update-homebrew.sh
+npm run release
 ```
-After committing changes manually, run this to update your local Homebrew installation for testing.
 
 ### Create Release Tarball
 ```bash

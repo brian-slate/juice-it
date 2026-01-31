@@ -184,16 +184,21 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 Contributing to JuiceIt? Here's how to test your changes:
 
-### Quick Development Workflow
+### Local Testing Workflow
 
 ```bash
-# Make your changes to the code, then:
-./bin/quick-test.sh "Your commit message"
+# 1. Make your changes
+vim juiceit.js
 
-# This will:
-# 1. Commit your changes
-# 2. Update your Homebrew installation
-# 3. Make juiceit command ready to test
+# 2. Commit
+git add -A
+git commit -m "Your message"
+
+# 3. Update Homebrew installation
+./bin/update-homebrew.sh
+
+# 4. Test
+juiceit --help
 ```
 
 ### Testing
@@ -212,7 +217,9 @@ juiceit --scan-only
 ### Documentation
 
 - `NPM_COMMANDS.md` - All npm scripts and testing commands
-- `HOMEBREW_DISTRIBUTION.md` - Guide for publishing to Homebrew
+- `RELEASE.md` - How to create a new release
+- `PUBLISH_TAP.md` - Publishing your tap to GitHub (recommended)
+- `HOMEBREW_DISTRIBUTION.md` - Advanced distribution options
 - `COMPLETION_SUMMARY.md` - Implementation details
 - `IMPLEMENTATION_PLAN_*.md` - Feature specifications
 
