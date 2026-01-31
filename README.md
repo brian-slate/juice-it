@@ -6,11 +6,16 @@ A smart DVD ripper with automatic metadata lookup and episode naming. Rip entire
 
 - 🔍 **Auto DVD Detection** - Automatically detects inserted DVDs
 - 📺 **Smart Metadata Lookup** - Fetches TV show and movie info from TMDB
+- 🤖 **AI-Powered Mapping** (Optional) - Uses OpenAI to intelligently map tracks to episodes
+  - Automatic TMDB match selection
+  - Handles complex disc layouts (non-sequential episodes, menus, extras)
+  - Smart skip detection for menus and bonus content
+  - Confidence scoring for each decision
 - 📋 **Episode Naming** - Automatically names episodes (e.g., `S01E01_Episode_Title.mp4`)
 - 🎯 **Track Categorization** - Identifies menus, extras, episodes, and full disc rips
 - 💾 **Intelligent Caching** - Remembers disc info for faster re-rips
 - 🎨 **Beautiful Progress UI** - Real-time progress bars with time estimates
-- 🔄 **Interactive Mapping** - Review and adjust episode assignments before finalizing
+- 🔄 **Interactive Mapping** - Review and adjust episode assignments before ripping
 - 📦 **Homebrew Installation** - Install globally with `brew install`
 
 ## Installation
@@ -38,7 +43,9 @@ npm install
 
 ## Setup
 
-After installation, configure your TMDB API key:
+After installation, configure your API keys:
+
+### TMDB API Key (Required)
 
 1. **Get a free API key** from [TMDB](https://www.themoviedb.org/settings/api)
    - Sign up at https://www.themoviedb.org/signup
@@ -46,18 +53,41 @@ After installation, configure your TMDB API key:
    - Request API key (select "Developer")
    - Copy your "API Key (v3 auth)"
 
-2. **Run setup:**
+### OpenAI API Key (Optional - Enables AI Features)
+
+2. **Get an OpenAI API key** from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Create an account at https://platform.openai.com/signup
+   - Go to API Keys and create a new key
+   - **Cost:** ~$0.001-0.002 per disc (uses GPT-4o-mini)
+   - **Benefits:**
+     - Automatic TMDB match selection
+     - Intelligent track-to-episode mapping
+     - Handles complex disc layouts automatically
+     - Auto-detects menus and extras
+
+### Run Setup
+
+3. **Configure both keys:**
    ```bash
    juiceit --setup
    ```
+   
+   The setup will:
+   - Prompt for TMDB key (required)
+   - Optionally prompt for OpenAI key
+   - Validate both keys
+   - Save securely to `~/.config/juice-it/config.json`
 
-3. **Start ripping!**
+4. **Start ripping!**
    ```bash
    juiceit
    ```
 
-> **Note:** JuiceIt includes a demo API key for testing, but it's rate-limited. 
+> **Note:** JuiceIt includes a demo TMDB key for testing, but it's rate-limited. 
 > We recommend getting your own free key for best performance.
+> 
+> **AI features are optional** - JuiceIt works great without OpenAI, you'll just need
+> to manually select TMDB matches and review track mappings.
 
 ## Installation (Old)
 
