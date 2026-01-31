@@ -1239,8 +1239,17 @@ async function getNumberOfTitles() {
             output += dataStr;
         });
 
-        handbrakeProcess.on('exit', (exitCode) => {
-            if (exitCode === 0) {
+        let resolved = false;
+        
+        function processResults(exitCode) {
+            if (resolved) return;
+            resolved = true;
+            
+            // Destroy streams to ensure cleanup
+            if (handbrakeProcess.stdout) handbrakeProcess.stdout.destroy();
+            if (handbrakeProcess.stderr) handbrakeProcess.stderr.destroy();
+            
+            if (exitCode === 0 || exitCode === null) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
                     const numTitles = parseInt(match[1], 10);
@@ -1304,6 +1313,11 @@ async function getNumberOfTitles() {
             } else {
                 reject(`HandBrakeCLI process exited with code ${exitCode}`);
             }
+        }
+
+        // Use 'exit' event - fires when process exits, before streams close
+        handbrakeProcess.on('exit', (exitCode) => {
+            processResults(exitCode);
         });
     });
 }
