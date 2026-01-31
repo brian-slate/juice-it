@@ -1,19 +1,24 @@
-.PHONY: help test demo install update release
+.PHONY: help test demo install reinstall release
 
 help:
 	@echo "JuiceIt Development Commands"
 	@echo ""
-	@echo "  make test      - Run automated tests"
-	@echo "  make demo      - Run interactive mapping demo"
-	@echo "  make install   - Install/update Homebrew installation"
-	@echo "  make release   - Create a new release (see RELEASE.md for details)"
+	@echo "  make install    - Install npm dependencies"
+	@echo "  make test       - Run automated tests"
+	@echo "  make demo       - Run interactive mapping demo"
+	@echo "  make reinstall  - Reinstall in Homebrew for local testing"
+	@echo "  make release    - Create a new release (see RELEASE.md)"
 	@echo ""
 	@echo "Local Testing Workflow:"
 	@echo "  1. Edit code"
 	@echo "  2. Commit changes"
-	@echo "  3. make install"
+	@echo "  3. make reinstall"
 	@echo "  4. Test with 'juiceit' command"
 	@echo ""
+
+install:
+	@echo "Installing dependencies..."
+	npm install
 
 test:
 	npm test
@@ -21,11 +26,9 @@ test:
 demo:
 	npm run demo
 
-install:
-	@echo "Updating Homebrew installation..."
+reinstall:
+	@echo "Reinstalling in Homebrew for testing..."
 	@./bin/update-homebrew.sh
-
-update: install
 
 release:
 	@echo "Creating release..."

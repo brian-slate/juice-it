@@ -7,11 +7,12 @@ Quick reference for development and testing commands.
 You can use either `make` commands or `npm` scripts:
 
 ```bash
-make help      # Show all make targets
-make test      # Run tests
-make demo      # Run demo
-make install   # Update Homebrew installation
-make release   # Create release
+make help        # Show all make targets
+make install     # Install npm dependencies
+make test        # Run tests
+make demo        # Run demo
+make reinstall   # Reinstall in Homebrew for testing
+make release     # Create release
 ```
 
 ## Testing
@@ -45,9 +46,9 @@ Launches an interactive demo of the episode mapping feature. Creates mock DVD tr
    git add -A
    git commit -m "Your message"
    ```
-3. Update Homebrew installation:
+3. Reinstall in Homebrew:
    ```bash
-   ./bin/update-homebrew.sh
+   make reinstall
    ```
 4. Test with `juiceit` command
 
