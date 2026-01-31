@@ -2291,9 +2291,17 @@ async function ripAllTracks() {
                     aiReasoning = aiMapping.reasoning;
                     aiConfidence = aiMapping.confidence;
                 } else {
-                    proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+                    // AI didn't provide a mapping for this track - skip it
+                    status = 'skip';
+                    proposedName = '(will skip)';
+                    aiReasoning = 'AI did not analyze this track';
+                    aiConfidence = null;
+                    if (options.verbose) {
+                        console.log(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
+                    }
                 }
             } else {
+                // No AI - use fallback sequential mapping
                 proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
             }
             
