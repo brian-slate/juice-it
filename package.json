@@ -16,6 +16,7 @@
   "dependencies": {
     "axios": "^1.13.4",
     "enquirer": "^2.4.1",
+    "node-pty": "^1.1.0",
     "openai": "^6.17.0"
   },
   "devDependencies": {

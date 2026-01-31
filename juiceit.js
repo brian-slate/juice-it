@@ -1177,7 +1177,9 @@ async function getNumberOfTitles() {
     return new Promise((resolve, reject) => {
         const args = ['-i', options.dvdSource, '--title', '0', '--scan'];
 
-        const handbrakeProcess = spawn('HandBrakeCLI', args);
+        const handbrakeProcess = spawn('HandBrakeCLI', args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
 
         let output = '';
         let progressDots = 0;
