@@ -1239,7 +1239,7 @@ async function getNumberOfTitles() {
             output += dataStr;
         });
 
-        handbrakeProcess.on('close', (exitCode) => {
+        handbrakeProcess.on('exit', (exitCode) => {
             if (exitCode === 0) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
