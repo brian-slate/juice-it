@@ -1285,62 +1285,67 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
 
 // Edit track mapping before ripping
 async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileName) {
-    // Select track
-    const trackChoices = proposedMappings.map(m => {
-        const warn = (m.duration < 5 || m.duration > 60) ? '⚠️ ' : '';
-        const skip = m.status === 'skip' ? '(SKIP) ' : '';
-        return {
-            name: `${warn}${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
-            value: m.trackNum
-        };
-    });
-    
-    const trackSelector = new Select({
-        message: 'Select track to edit:',
-        choices: [...trackChoices, { name: '← Back', value: 'back' }]
-    });
-    
-    const selectedTrack = await trackSelector.run();
-    if (selectedTrack === 'back') return;
-    
-    const mapping = proposedMappings.find(m => m.trackNum === selectedTrack);
-    
-    // Build episode choices
-    const episodeChoices = [];
-    if (metadata.type === 'tv' && metadata.episodes) {
-        metadata.episodes.forEach((ep, idx) => {
-            const seasonNum = String(metadata.season).padStart(2, '0');
-            const episodeNum = String(ep.episode_number).padStart(2, '0');
-            const episodeName = ep.name ? `_${ep.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-            const proposedName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
-            episodeChoices.push({
-                name: `S${seasonNum}E${episodeNum} - ${ep.name} (${ep.runtime}min)`,
-                value: proposedName
-            });
+    try {
+        // Select track
+        const trackChoices = proposedMappings.map(m => {
+            const warn = (m.duration < 5 || m.duration > 60) ? '⚠️ ' : '';
+            const skip = m.status === 'skip' ? '(SKIP) ' : '';
+            return {
+                name: `${warn}${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
+                value: m.trackNum
+            };
         });
-    }
-    
-    episodeChoices.push({ name: 'Mark as Extra/Skip', value: 'SKIP' });
-    episodeChoices.push({ name: '← Back', value: 'back' });
-    
-    const assignmentMenu = new Select({
-        message: `Reassign Track ${selectedTrack} to:`,
-        choices: episodeChoices
-    });
-    
-    const assignment = await assignmentMenu.run();
-    if (assignment === 'back') return;
-    
-    if (assignment === 'SKIP') {
-        mapping.status = 'skip';
-        mapping.proposedName = '(will skip)';
-        console.log(`\n  ✓ Track ${selectedTrack} will be skipped\n`);
-        log(`Track ${selectedTrack} marked to skip`);
-    } else {
-        mapping.status = 'pending'; // Still pending but with new name
-        mapping.proposedName = assignment;
-        console.log(`\n  ✓ Track ${selectedTrack} reassigned to: ${assignment}\n`);
-        log(`Track ${selectedTrack} reassigned to: ${assignment}`);
+        
+        const trackSelector = new Select({
+            message: 'Select track to edit:',
+            choices: [...trackChoices, { name: '← Back', value: 'back' }]
+        });
+        
+        const selectedTrack = await trackSelector.run();
+        if (selectedTrack === 'back') return;
+        
+        const mapping = proposedMappings.find(m => m.trackNum === selectedTrack);
+        
+        // Build episode choices
+        const episodeChoices = [];
+        if (metadata.type === 'tv' && metadata.episodes) {
+            metadata.episodes.forEach((ep, idx) => {
+                const seasonNum = String(metadata.season).padStart(2, '0');
+                const episodeNum = String(ep.episode_number).padStart(2, '0');
+                const episodeName = ep.name ? `_${ep.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+                const proposedName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
+                episodeChoices.push({
+                    name: `S${seasonNum}E${episodeNum} - ${ep.name} (${ep.runtime}min)`,
+                    value: proposedName
+                });
+            });
+        }
+        
+        episodeChoices.push({ name: 'Mark as Extra/Skip', value: 'SKIP' });
+        episodeChoices.push({ name: '← Back', value: 'back' });
+        
+        const assignmentMenu = new Select({
+            message: `Reassign Track ${selectedTrack} to:`,
+            choices: episodeChoices
+        });
+        
+        const assignment = await assignmentMenu.run();
+        if (assignment === 'back') return;
+        
+        if (assignment === 'SKIP') {
+            mapping.status = 'skip';
+            mapping.proposedName = '(will skip)';
+            console.log(`\n  ✓ Track ${selectedTrack} will be skipped\n`);
+            log(`Track ${selectedTrack} marked to skip`);
+        } else {
+            mapping.status = 'pending'; // Still pending but with new name
+            mapping.proposedName = assignment;
+            console.log(`\n  ✓ Track ${selectedTrack} reassigned to: ${assignment}\n`);
+            log(`Track ${selectedTrack} reassigned to: ${assignment}`);
+        }
+    } catch (err) {
+        // User cancelled (Ctrl-C or ESC) - just return to main menu
+        console.log('\n  ← Returning to main menu\n');
     }
 }
 
