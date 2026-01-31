@@ -1236,8 +1236,11 @@ async function getNumberOfTitles() {
             output += dataStr;
         });
 
-        handbrakeProcess.on('close', (exitCode) => {
+        // Use 'exit' event instead of 'close' for better compatibility with verbose output
+        handbrakeProcess.on('exit', (exitCode) => {
             clearInterval(progressInterval);
+            // Give a small delay to ensure all output is captured
+            setTimeout(() => {
             if (exitCode === 0) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
@@ -1301,6 +1304,7 @@ async function getNumberOfTitles() {
             } else {
                 reject(`HandBrakeCLI process exited with code ${exitCode}`);
             }
+            }, 100); // 100ms delay to capture remaining output
         });
     });
 }
