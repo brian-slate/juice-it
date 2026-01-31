@@ -1225,8 +1225,6 @@ async function reviewAndMapEpisodes(proposedMappings, metadata, volumeName, base
     
     // Main menu loop
     while (true) {
-        const { Select } = require('enquirer');
-        
         const mainMenu = new Select({
             message: 'What would you like to do?',
             choices: [
@@ -1282,8 +1280,6 @@ async function reviewAndMapEpisodes(proposedMappings, metadata, volumeName, base
 
 // Edit individual track mapping
 async function editTrackMapping(proposedMappings, metadata, baseFileName) {
-    const { Select } = require('enquirer');
-    
     // Select track
     const trackChoices = proposedMappings.map(m => {
         const warn = shouldWarn(m.fileSize, m.duration) ? '⚠️ ' : '';
