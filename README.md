@@ -73,10 +73,14 @@ After installation, configure your API keys:
    ```
    
    The setup will:
-   - Prompt for TMDB key (required)
-   - Optionally prompt for OpenAI key
+   - Prompt for TMDB key (press Enter to use rate-limited demo key)
+   - Optionally prompt for OpenAI key (press Enter to skip)
    - Validate both keys
    - Save securely to `~/.config/juice-it/config.json`
+   
+   **Quick start:** You can press Enter for both prompts to get started immediately with:
+   - Demo TMDB key (rate limited)
+   - No AI features (manual selection and mapping)
 
 4. **Start ripping!**
    ```bash

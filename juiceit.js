@@ -371,29 +371,37 @@ async function runSetup() {
     console.log('');
     
     const tmdbPrompt = new Input({
-        message: 'Enter your TMDB API key:',
+        message: 'Enter your TMDB API key (or press Enter to use demo key):',
         validate(value) {
-            return value.length > 0 || 'API key cannot be empty';
+            return true; // Allow blank for demo key
         }
     });
     
     try {
         const tmdbApiKey = await tmdbPrompt.run();
         
-        console.log('');
-        console.log('🔍 Validating TMDB API key...');
-        
-        const isTmdbValid = await validateTmdbApiKey(tmdbApiKey);
-        
-        if (isTmdbValid) {
-            config.tmdbApiKey = tmdbApiKey;
-            console.log('✅ TMDB API key validated!');
+        if (tmdbApiKey && tmdbApiKey.trim().length > 0) {
+            console.log('');
+            console.log('🔍 Validating TMDB API key...');
+            
+            const isTmdbValid = await validateTmdbApiKey(tmdbApiKey);
+            
+            if (isTmdbValid) {
+                config.tmdbApiKey = tmdbApiKey;
+                console.log('✅ TMDB API key validated!');
+            } else {
+                console.log('❌ Invalid TMDB API key. Please check and try again.');
+                console.log('');
+                console.log('Run `juiceit --setup` to try again.');
+                console.log('');
+                process.exit(1);
+            }
         } else {
-            console.log('❌ Invalid TMDB API key. Please check and try again.');
+            // Use demo key
             console.log('');
-            console.log('Run `juiceit --setup` to try again.');
-            console.log('');
-            process.exit(1);
+            console.log('ℹ️  Using demo TMDB API key (rate limited)');
+            console.log('   Get your free key at: https://www.themoviedb.org/settings/api');
+            config.tmdbApiKey = 'REMOVED_API_KEY';
         }
         
         // OpenAI API Key Setup (Optional)
@@ -422,27 +430,33 @@ async function runSetup() {
         
         if (openAiChoice === 'Yes') {
             const openAiPrompt = new Input({
-                message: 'Enter your OpenAI API key:',
+                message: 'Enter your OpenAI API key (or press Enter to skip):',
                 validate(value) {
-                    return value.length > 0 || 'API key cannot be empty';
+                    return true; // Allow blank to skip
                 }
             });
             
             const openAiApiKey = await openAiPrompt.run();
             
-            console.log('');
-            console.log('🔍 Validating OpenAI API key...');
-            
-            const isOpenAiValid = await validateOpenAiApiKey(openAiApiKey);
-            
-            if (isOpenAiValid) {
-                config.openaiApiKey = openAiApiKey;
-                console.log('✅ OpenAI API key validated!');
+            if (openAiApiKey && openAiApiKey.trim().length > 0) {
                 console.log('');
-                console.log('✨ AI features are now enabled!');
+                console.log('🔍 Validating OpenAI API key...');
+                
+                const isOpenAiValid = await validateOpenAiApiKey(openAiApiKey);
+                
+                if (isOpenAiValid) {
+                    config.openaiApiKey = openAiApiKey;
+                    console.log('✅ OpenAI API key validated!');
+                    console.log('');
+                    console.log('✨ AI features are now enabled!');
+                } else {
+                    console.log('❌ Invalid OpenAI API key.');
+                    console.log('   Continuing without AI features.');
+                }
             } else {
-                console.log('❌ Invalid OpenAI API key.');
-                console.log('   Continuing without AI features.');
+                console.log('');
+                console.log('ℹ️  No OpenAI key provided. Continuing without AI features.');
+                console.log('   You can add it later by running `juiceit --setup` again.');
             }
         } else {
             console.log('');
@@ -930,13 +944,30 @@ if (options.runSetup) {
     })();
     // Exit early - don't continue to ripping
 } else {
-    // Show warning if using demo key
-    if (!config.tmdbApiKey && !options.noLookup) {
-        console.log('');
-        console.log('⚠️  Using demo TMDB API key (rate limited)');
-        console.log('   Get your free API key: https://www.themoviedb.org/settings/api');
-        console.log('   Run: juiceit --setup');
-        console.log('');
+    // Show API key status messages
+    if (!options.noLookup) {
+        if (!config.tmdbApiKey) {
+            console.log('');
+            console.log('⚠️  Using demo TMDB API key (rate limited)');
+            console.log('   Get your free API key: https://www.themoviedb.org/settings/api');
+            console.log('   Run: juiceit --setup');
+            console.log('');
+        }
+        
+        // Show AI status
+        if (!config.openaiApiKey) {
+            console.log('');
+            console.log('ℹ️  AI-powered mapping is NOT enabled');
+            console.log('   To enable automatic track mapping and TMDB selection:');
+            console.log('   1. Get an OpenAI API key: https://platform.openai.com/api-keys');
+            console.log('   2. Run: juiceit --setup');
+            console.log('   Cost: ~$0.001 per disc');
+            console.log('');
+        } else {
+            console.log('');
+            console.log('✨ AI-powered mapping is enabled!');
+            console.log('');
+        }
     }
 
     // Async initialization function
