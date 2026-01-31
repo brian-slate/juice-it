@@ -1634,16 +1634,27 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
         const proposedName = mapping.proposedName || 'unknown';
         console.log(`  ${trackStr}     ${durationStr}  ${statusIcon}     ${proposedName}`);
         
-        // Show AI reasoning if available
-        if (mapping.aiReasoning && options.verbose) {
-            console.log(`         AI: ${mapping.aiReasoning} (${(mapping.aiConfidence * 100).toFixed(0)}% confidence)`);
+        // Show AI confidence and reasoning if available (always show confidence, verbose shows full reasoning)
+        if (mapping.aiConfidence !== null) {
+            const confidenceStr = `${(mapping.aiConfidence * 100).toFixed(0)}%`;
+            if (options.verbose && mapping.aiReasoning) {
+                console.log(`         AI (${confidenceStr}): ${mapping.aiReasoning}`);
+            } else if (mapping.aiReasoning) {
+                // Show brief reasoning in non-verbose mode
+                const shortReason = mapping.aiReasoning.length > 60 
+                    ? mapping.aiReasoning.substring(0, 57) + '...' 
+                    : mapping.aiReasoning;
+                console.log(`         AI (${confidenceStr}): ${shortReason}`);
+            }
         }
     }
     
     if (hasAI) {
         console.log('');
         console.log('  ✨ AI has analyzed and mapped tracks automatically');
-        console.log('  ℹ️  Use --verbose to see AI reasoning for each track');
+        if (!options.verbose) {
+            console.log('  ℹ️  Use --verbose to see full AI reasoning for each track');
+        }
     }
     
     console.log('');
@@ -1715,8 +1726,9 @@ async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileNam
         // Select track
         const trackChoices = proposedMappings.map(m => {
             const skip = m.status === 'skip' ? '(SKIP) ' : '';
+            const aiConf = m.aiConfidence !== null ? ` [AI: ${(m.aiConfidence * 100).toFixed(0)}%]` : '';
             return {
-                name: `${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
+                name: `${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)${aiConf}`,
                 value: m.trackNum
             };
         });
