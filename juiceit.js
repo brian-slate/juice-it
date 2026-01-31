@@ -809,6 +809,8 @@ args.forEach((arg, index) => {
         options.scanOnly = true; // Only scan and show metadata
     } else if (arg === '--setup') {
         options.runSetup = true; // Run API key setup
+    } else if (arg === '--plan') {
+        options.planOnly = true; // Only create a plan, don't rip
     }
 });
 
@@ -1688,6 +1690,13 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
                     }
                 }
             } else if (choice === 'Accept All and Start Ripping') {
+                // Save plan if in plan-only mode
+                if (options.planOnly) {
+                    await savePlan(proposedMappings, metadata, volumeName, baseFileName);
+                    console.log('\n  ✓ Plan saved!\n');
+                    return null; // Don't proceed to ripping
+                }
+                
                 // Finalize mappings - set status to the final filename
                 for (const mapping of proposedMappings) {
                     if (mapping.status === 'pending') {
@@ -2007,6 +2016,68 @@ async function finalizeRenames(proposedMappings, outputDir) {
     console.log('');
 }
 
+// Save rip plan to file
+async function savePlan(proposedMappings, metadata, volumeName, baseFileName) {
+    const planPath = path.join(options.outputDir, 'juiceit-plan.json');
+    
+    const plan = {
+        version: '1.0',
+        createdAt: new Date().toISOString(),
+        volumeName,
+        baseFileName,
+        metadata,
+        mappings: proposedMappings.map(m => ({
+            trackNum: m.trackNum,
+            duration: m.duration,
+            status: m.status,
+            proposedName: m.proposedName,
+            aiReasoning: m.aiReasoning,
+            aiConfidence: m.aiConfidence
+        }))
+    };
+    
+    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2));
+    log(`Plan saved to: ${planPath}`);
+    
+    console.log('');
+    console.log('┃'.repeat(60));
+    console.log('  📄 Rip Plan Saved');
+    console.log('┃'.repeat(60));
+    console.log(`  Location: ${path.relative(process.cwd(), planPath)}`);
+    console.log('');
+    console.log('  Summary:');
+    const toRip = proposedMappings.filter(m => m.status !== 'skip').length;
+    const toSkip = proposedMappings.filter(m => m.status === 'skip').length;
+    console.log(`    • ${toRip} track(s) to rip`);
+    console.log(`    • ${toSkip} track(s) to skip`);
+    console.log('');
+    console.log('  To execute this plan:');
+    console.log(`    juiceit`);
+    console.log('┃'.repeat(60));
+    console.log('');
+}
+
+// Load rip plan from file
+function loadPlan() {
+    const planPath = path.join(options.outputDir, 'juiceit-plan.json');
+    
+    if (!fs.existsSync(planPath)) {
+        return null;
+    }
+    
+    try {
+        const planData = fs.readFileSync(planPath, 'utf8');
+        const plan = JSON.parse(planData);
+        log(`Loaded plan from: ${planPath}`);
+        return plan;
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`Error loading plan: ${error.message}`);
+        }
+        return null;
+    }
+}
+
 // Helper to calculate proposed name
 function calculateProposedName(index, metadata, baseFileName, numTitles) {
     const titleNumber = index + 1;
@@ -2031,7 +2102,6 @@ function calculateProposedName(index, metadata, baseFileName, numTitles) {
 async function ripAllTracks() {
     let logFilePath = null;
     let successCount = 0;
-    const proposedMappings = [];
     
     try {
         const volumeName = getVolumeName(); // Get the DVD volume name
@@ -2114,14 +2184,91 @@ async function ripAllTracks() {
             baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
         }
 
-        // Try AI-powered track mapping if available
-        const config = loadConfig();
-        let aiMappingResult = null;
-        if (config.openaiApiKey && global.dvdTitleDurations && metadata.type === 'tv') {
-            aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata);
+        // Check for existing plan
+        const existingPlan = loadPlan();
+        let proposedMappings = [];
+        
+        if (existingPlan) {
+            console.log('');
+            console.log('📄 Found existing rip plan!');
+            console.log(`   Created: ${new Date(existingPlan.createdAt).toLocaleString()}`);
+            console.log(`   Tracks to rip: ${existingPlan.mappings.filter(m => m.status !== 'skip').length}`);
+            console.log('');
+            
+            try {
+                const usePlanPrompt = new Select({
+                    message: 'What would you like to do?',
+                    choices: [
+                        'Use existing plan and start ripping',
+                        'Review/edit existing plan',
+                        'Delete and create new plan'
+                    ]
+                });
+                
+                const choice = await usePlanPrompt.run();
+                
+                if (choice === 'Use existing plan and start ripping') {
+                    // Reconstruct proposedMappings from plan and skip review
+                    proposedMappings = existingPlan.mappings.map(m => ({
+                        trackNum: m.trackNum,
+                        filename: null,
+                        proposedName: m.proposedName,
+                        fileSize: 0,
+                        duration: m.duration,
+                        status: m.status === 'pending' ? m.proposedName : m.status, // Finalize status
+                        aiReasoning: m.aiReasoning,
+                        aiConfidence: m.aiConfidence
+                    }));
+                    
+                    metadata = existingPlan.metadata;
+                    baseFileName = existingPlan.baseFileName;
+                    
+                    console.log('');
+                    console.log('✓ Using existing plan, starting rip...\n');
+                    log('Using existing rip plan, skipping review');
+                } else if (choice === 'Review/edit existing plan') {
+                    // Load plan for review
+                    proposedMappings = existingPlan.mappings.map(m => ({
+                        trackNum: m.trackNum,
+                        filename: null,
+                        proposedName: m.proposedName,
+                        fileSize: 0,
+                        duration: m.duration,
+                        status: m.status,
+                        aiReasoning: m.aiReasoning,
+                        aiConfidence: m.aiConfidence
+                    }));
+                    
+                    metadata = existingPlan.metadata;
+                    baseFileName = existingPlan.baseFileName;
+                    
+                    console.log('');
+                    console.log('✓ Loading plan for review...\n');
+                    log('Loading existing plan for review');
+                } else {
+                    // Delete existing plan and create new
+                    const planPath = path.join(options.outputDir, 'juiceit-plan.json');
+                    fs.unlinkSync(planPath);
+                    console.log('');
+                    console.log('✓ Deleted existing plan, creating new...\n');
+                    log('User chose to delete plan and create new');
+                }
+            } catch (error) {
+                console.log('\nCancelled.\n');
+                return;
+            }
         }
         
-        // Build proposed mappings with track info before ripping
+        // If no plan loaded, create new mappings
+        if (proposedMappings.length === 0) {
+            // Try AI-powered track mapping if available
+            const config = loadConfig();
+            let aiMappingResult = null;
+            if (config.openaiApiKey && global.dvdTitleDurations && metadata.type === 'tv') {
+                aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata);
+            }
+            
+            // Build proposed mappings with track info before ripping
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
             const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
             let proposedName;
@@ -2161,16 +2308,26 @@ async function ripAllTracks() {
                 aiConfidence: aiConfidence
             });
         }
+        } // End of "if no plan loaded" block
         
-        // Interactive review BEFORE ripping
-        console.log('');
-        const mappingsToRip = await reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName);
+        // Interactive review BEFORE ripping (skip if using existing plan directly)
+        let mappingsToRip;
+        const skipReview = existingPlan && proposedMappings.some(m => m.status !== 'pending' && m.status !== 'skip');
         
-        if (!mappingsToRip || mappingsToRip.length === 0) {
+        if (skipReview) {
+            // Already finalized from existing plan
+            mappingsToRip = proposedMappings;
+            log('Skipping review - using finalized plan');
+        } else {
             console.log('');
-            console.log('  ℹ️  Ripping cancelled.');
-            console.log('');
-            return;
+            mappingsToRip = await reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName);
+            
+            if (!mappingsToRip || mappingsToRip.length === 0) {
+                console.log('');
+                console.log('  ℹ️  Ripping cancelled.');
+                console.log('');
+                return;
+            }
         }
         
         console.log('');
@@ -2288,6 +2445,7 @@ Options:
   --quality         Set the encoding quality (e.g., 20)
   --no-deinterlace  Disable deinterlacing
   --no-lookup       Skip online metadata lookup
+  --plan            Create a rip plan and exit (don't rip yet)
   --rename-only     Only rename existing files using metadata (no ripping)
   --scan-only       Scan disc and show metadata without ripping
   --subtitles       Specify the subtitle track number (default: 1)
