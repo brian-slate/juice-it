@@ -352,6 +352,9 @@ You must respond with valid JSON only.`;
             name: metadata.name
         };
         
+        const episodeCount = metadata.episodes ? metadata.episodes.length : 0;
+        const avgRuntime = metadata.episodes ? Math.round(metadata.episodes.reduce((sum, ep) => sum + (ep.runtime || 25), 0) / episodeCount) : 25;
+        
         const userMessage = `Map DVD tracks to episodes/content.
 
 DVD Track Information:
@@ -360,13 +363,21 @@ ${JSON.stringify(trackInfo, null, 2)}
 Content Metadata:
 ${JSON.stringify(contentInfo, null, 2)}
 
+Important Context:
+- Total ${trackInfo.length} tracks detected on disc
+- Expected ${episodeCount} episodes with average runtime of ~${avgRuntime} minutes
+- Tracks may be non-sequential (episodes at tracks 1-3, 17-23 with menus in between)
+- Some track durations may show as 0 if parsing failed - skip these
+
 Task: Map each DVD track to an episode or mark as skip.
-Consider:
-- Match track durations to episode runtimes (allow reasonable variance, typically ±5-10 minutes)
-- Mark tracks as skip ONLY if they clearly don't match any episode runtime (e.g., very short menu screens or duplicates)
-- Handle non-sequential layouts (episodes may not align with track order)
-- Some discs have menus/extras interspersed between episodes
-- Base skip decisions primarily on whether duration matches expected episode runtimes, not arbitrary thresholds
+Your goal is to find exactly ${episodeCount} tracks that match the episode runtimes.
+
+Guidelines:
+- Match track durations to episode runtimes (within 3-10 minutes is acceptable)
+- Tracks with 0 duration should be skipped (data parsing failed)
+- Very short tracks (<3 min) are typically menus unless matching an episode runtime
+- Episodes may be at non-sequential track numbers
+- Find all ${episodeCount} episode-length tracks and map them, mark the rest as skip
 
 Respond with JSON only:
 {
