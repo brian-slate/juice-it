@@ -181,14 +181,27 @@ async function callOpenAI(systemMessage, userMessage) {
     try {
         const config = loadConfig();
         if (!config.openaiApiKey) {
+            if (options.verbose) {
+                console.log('\n[AI] No OpenAI key configured, skipping AI call');
+            }
             return null;
         }
+        
+        if (options.verbose) {
+            console.log('\n[AI] Calling OpenAI API...');
+            console.log('[AI] Model: gpt-4o-mini');
+            console.log('[AI] System message:', systemMessage.substring(0, 100) + '...');
+            console.log('[AI] User message length:', userMessage.length, 'chars');
+        }
+        log('AI: Calling OpenAI API with gpt-4o-mini');
+        log(`AI: User message length: ${userMessage.length} chars`);
         
         const openai = new OpenAI({ 
             apiKey: config.openaiApiKey,
             timeout: 30000 // 30 second timeout
         });
         
+        const startTime = Date.now();
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
@@ -198,12 +211,24 @@ async function callOpenAI(systemMessage, userMessage) {
             temperature: 0.1,
             response_format: { type: 'json_object' }
         });
+        const elapsed = Date.now() - startTime;
         
         const content = response.choices[0].message.content;
-        return JSON.parse(content);
+        const result = JSON.parse(content);
+        
+        if (options.verbose) {
+            console.log(`[AI] Response received in ${elapsed}ms`);
+            console.log('[AI] Tokens used:', response.usage.total_tokens);
+            console.log('[AI] Response:', JSON.stringify(result, null, 2));
+        }
+        log(`AI: Response received in ${elapsed}ms`);
+        log(`AI: Tokens - prompt: ${response.usage.prompt_tokens}, completion: ${response.usage.completion_tokens}, total: ${response.usage.total_tokens}`);
+        log(`AI: Response: ${JSON.stringify(result)}`);
+        
+        return result;
     } catch (error) {
         if (options.verbose) {
-            console.log(`\nAI error: ${error.message}`);
+            console.log(`\n[AI] Error: ${error.message}`);
         }
         log(`AI API error: ${error.message}`);
         return null;
@@ -214,6 +239,16 @@ async function callOpenAI(systemMessage, userMessage) {
 async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults) {
     try {
         console.log('\n🤖 Using AI to analyze disc and select best match...');
+        if (options.verbose) {
+            console.log('[AI] Starting TMDB match selection');
+            console.log('[AI] Analyzing:', volumeName, 'with', numTitles, 'tracks');
+            console.log('[AI] Track durations:', JSON.stringify(trackDurations));
+            console.log('[AI] TMDB results: ', movieResults.length, 'movies,', tvResults.length, 'TV shows');
+        }
+        log('AI: Starting TMDB match selection');
+        log(`AI: Disc - ${volumeName} with ${numTitles} tracks`);
+        log(`AI: Track durations - ${JSON.stringify(trackDurations)}`);
+        log(`AI: TMDB results - ${movieResults.length} movies, ${tvResults.length} TV shows`);
         
         const systemMessage = `You are an expert at analyzing DVD disc metadata to identify TV shows and movies. 
 You must respond with valid JSON only.`;
@@ -263,7 +298,13 @@ Respond with JSON only:
         if (result && result.selectedId) {
             console.log(`   ✓ AI selected: ${result.selectedType === 'tv' ? 'TV' : 'Movie'} (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
             console.log(`   Reasoning: ${result.reasoning}`);
+            if (options.verbose) {
+                console.log('[AI] Selected ID:', result.selectedId);
+                console.log('[AI] Season:', result.season || 'N/A');
+            }
             log(`AI TMDB selection: ${JSON.stringify(result)}`);
+        } else if (options.verbose) {
+            console.log('[AI] No match selected or low confidence');
         }
         
         return result;
@@ -279,6 +320,16 @@ Respond with JSON only:
 async function aiMapTracks(trackDurations, metadata) {
     try {
         console.log('\n🤖 Using AI to map tracks to episodes...');
+        if (options.verbose) {
+            console.log('[AI] Starting track mapping');
+            console.log('[AI] Track count:', Object.keys(trackDurations).length);
+            console.log('[AI] Content type:', metadata.type);
+            console.log('[AI] Episodes available:', metadata.episodes ? metadata.episodes.length : 'N/A');
+        }
+        log('AI: Starting track mapping');
+        log(`AI: Track count - ${Object.keys(trackDurations).length}`);
+        log(`AI: Content type - ${metadata.type}`);
+        log(`AI: Episodes - ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
         
         const systemMessage = `You are an expert at mapping DVD tracks to TV episodes or movie content.
 You must respond with valid JSON only.`;
@@ -338,7 +389,16 @@ Respond with JSON only:
             const mapCount = result.mappings.length - skipCount;
             console.log(`   ✓ AI mapped ${mapCount} tracks, marked ${skipCount} to skip`);
             console.log(`   Overall confidence: ${(result.overallConfidence * 100).toFixed(0)}%`);
+            if (options.verbose) {
+                console.log('[AI] Detailed mappings:');
+                result.mappings.forEach(m => {
+                    const action = m.shouldSkip ? 'SKIP' : `Episode ${m.episodeIndex !== null ? m.episodeIndex + 1 : '?'}`;
+                    console.log(`[AI]   Track ${m.trackNum}: ${action} (${(m.confidence * 100).toFixed(0)}% - ${m.reasoning})`);
+                });
+            }
             log(`AI track mapping: ${JSON.stringify(result)}`);
+        } else if (options.verbose) {
+            console.log('[AI] No mappings returned');
         }
         
         return result;
