@@ -31,6 +31,7 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const { Select, Input, AutoComplete } = require('enquirer');
+const OpenAI = require('openai');
 
 // ==================== LOGGING ====================
 
@@ -158,23 +159,42 @@ async function validateTmdbApiKey(apiKey) {
     }
 }
 
+// Validate OpenAI API key
+async function validateOpenAiApiKey(apiKey) {
+    try {
+        const openai = new OpenAI({ apiKey });
+        await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: 'test' }],
+            max_tokens: 5
+        });
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
 // Setup workflow for API key configuration
 async function runSetup() {
     console.log('');
     console.log('━'.repeat(60));
-    console.log('  🔑 JuiceIt TMDB API Key Setup');
+    console.log('  🔑 JuiceIt API Key Setup');
     console.log('━'.repeat(60));
     console.log('');
-    console.log('To use metadata lookup, you need a free TMDB API key.');
+    
+    const config = loadConfig();
+    
+    // TMDB API Key Setup (Required)
+    console.log('🎬 TMDB API Key (Required for metadata lookup)');
     console.log('');
-    console.log('📋 Steps to get your API key:');
+    console.log('📋 Steps to get your TMDB API key:');
     console.log('  1. Create account at https://www.themoviedb.org/signup');
     console.log('  2. Go to https://www.themoviedb.org/settings/api');
     console.log('  3. Request an API key (choose "Developer" option)');
     console.log('  4. Copy your "API Key (v3 auth)"');
     console.log('');
     
-    const prompt = new Input({
+    const tmdbPrompt = new Input({
         message: 'Enter your TMDB API key:',
         validate(value) {
             return value.length > 0 || 'API key cannot be empty';
@@ -182,31 +202,91 @@ async function runSetup() {
     });
     
     try {
-        const apiKey = await prompt.run();
+        const tmdbApiKey = await tmdbPrompt.run();
         
         console.log('');
-        console.log('🔍 Validating API key...');
+        console.log('🔍 Validating TMDB API key...');
         
-        const isValid = await validateTmdbApiKey(apiKey);
+        const isTmdbValid = await validateTmdbApiKey(tmdbApiKey);
         
-        if (isValid) {
-            const config = loadConfig();
-            config.tmdbApiKey = apiKey;
-            saveConfig(config);
-            
-            console.log('✅ API key validated and saved!');
-            console.log('');
-            console.log(`Config saved to: ${path.join(getConfigDir(), 'config.json')}`);
-            console.log('');
-            console.log('You can now use JuiceIt with metadata lookup.');
-            console.log('');
+        if (isTmdbValid) {
+            config.tmdbApiKey = tmdbApiKey;
+            console.log('✅ TMDB API key validated!');
         } else {
-            console.log('❌ Invalid API key. Please check and try again.');
+            console.log('❌ Invalid TMDB API key. Please check and try again.');
             console.log('');
             console.log('Run `juiceit --setup` to try again.');
             console.log('');
             process.exit(1);
         }
+        
+        // OpenAI API Key Setup (Optional)
+        console.log('');
+        console.log('━'.repeat(60));
+        console.log('🤖 OpenAI API Key (Optional - enables AI-powered track mapping)');
+        console.log('');
+        console.log('AI features:');
+        console.log('  • Automatic TMDB match selection');
+        console.log('  • Intelligent track-to-episode mapping');
+        console.log('  • Auto-detection of menus and extras');
+        console.log('  • Handles complex disc layouts automatically');
+        console.log('');
+        console.log('📋 To get an OpenAI API key:');
+        console.log('  1. Go to https://platform.openai.com/api-keys');
+        console.log('  2. Create a new API key');
+        console.log('  3. Typical cost: $0.001-0.002 per disc (uses GPT-4o-mini)');
+        console.log('');
+        
+        const skipOpenAI = new Select({
+            message: 'Do you want to configure OpenAI for AI features?',
+            choices: ['Yes', 'No (skip AI features)']
+        });
+        
+        const openAiChoice = await skipOpenAI.run();
+        
+        if (openAiChoice === 'Yes') {
+            const openAiPrompt = new Input({
+                message: 'Enter your OpenAI API key:',
+                validate(value) {
+                    return value.length > 0 || 'API key cannot be empty';
+                }
+            });
+            
+            const openAiApiKey = await openAiPrompt.run();
+            
+            console.log('');
+            console.log('🔍 Validating OpenAI API key...');
+            
+            const isOpenAiValid = await validateOpenAiApiKey(openAiApiKey);
+            
+            if (isOpenAiValid) {
+                config.openaiApiKey = openAiApiKey;
+                console.log('✅ OpenAI API key validated!');
+                console.log('');
+                console.log('✨ AI features are now enabled!');
+            } else {
+                console.log('❌ Invalid OpenAI API key.');
+                console.log('   Continuing without AI features.');
+            }
+        } else {
+            console.log('');
+            console.log('ℹ️  Skipping OpenAI setup. You can add it later by running `juiceit --setup` again.');
+        }
+        
+        // Save config
+        saveConfig(config);
+        
+        console.log('');
+        console.log('━'.repeat(60));
+        console.log(`✅ Setup complete! Config saved to: ${path.join(getConfigDir(), 'config.json')}`);
+        console.log('━'.repeat(60));
+        console.log('');
+        console.log('You can now use JuiceIt with metadata lookup.');
+        if (config.openaiApiKey) {
+            console.log('✨ AI-powered track mapping is enabled!');
+        }
+        console.log('');
+        
     } catch (error) {
         console.log('');
         console.log('Setup cancelled.');
