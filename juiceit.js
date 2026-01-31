@@ -1201,7 +1201,150 @@ async function renameExistingFiles() {
     }
 }
 
-// Interactive review and mapping function
+// Interactive review BEFORE ripping - returns mappings ready to rip
+async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName) {
+    console.log('\n' + '━'.repeat(60));
+    console.log('  📋 Review Track Mappings (Before Ripping)');
+    console.log('━'.repeat(60));
+    console.log('');
+    
+    // Display track table (no file sizes since not ripped yet)
+    console.log('  Track  Duration  Status  Proposed Name');
+    console.log('  -----  --------  ------  ' + '-'.repeat(40));
+    
+    for (const mapping of proposedMappings) {
+        const trackStr = String(mapping.trackNum).padStart(2);
+        const durationStr = `${mapping.duration} min`.padEnd(8);
+        const statusIcon = mapping.status === 'skip' ? '⏭' : (mapping.duration < 5 || mapping.duration > 60 ? '⚠️' : '✓');
+        const proposedName = mapping.proposedName || 'unknown';
+        console.log(`  ${trackStr}     ${durationStr}  ${statusIcon}     ${proposedName}`);
+    }
+    
+    console.log('');
+    
+    // Main menu loop
+    while (true) {
+        const mainMenu = new Select({
+            message: 'What would you like to do?',
+            choices: [
+                'Edit Track Mapping',
+                'Re-search TMDB and Re-auto-map',
+                'Accept All and Start Ripping',
+                'Cancel'
+            ]
+        });
+        
+        try {
+            const choice = await mainMenu.run();
+            
+            if (choice === 'Edit Track Mapping') {
+                await editTrackMappingBeforeRip(proposedMappings, metadata, baseFileName);
+            } else if (choice === 'Re-search TMDB and Re-auto-map') {
+                const newMetadata = await reAutoMap(volumeName, proposedMappings.length);
+                if (newMetadata) {
+                    metadata = newMetadata;
+                    // Re-calculate proposed names
+                    for (let i = 0; i < proposedMappings.length; i++) {
+                        if (proposedMappings[i].status !== 'skip') {
+                            proposedMappings[i].proposedName = calculateProposedName(i, metadata, baseFileName, proposedMappings.length);
+                        }
+                    }
+                }
+            } else if (choice === 'Accept All and Start Ripping') {
+                // Finalize mappings - set status to the final filename
+                for (const mapping of proposedMappings) {
+                    if (mapping.status === 'pending') {
+                        mapping.status = mapping.proposedName; // Final filename
+                    }
+                }
+                return proposedMappings;
+            } else {
+                console.log('\n  ✓ Operation cancelled\n');
+                return null;
+            }
+        } catch (err) {
+            console.log('\n  ✓ Operation cancelled\n');
+            return null;
+        }
+        
+        // Redisplay table after action
+        console.log('');
+        console.log('  Track  Duration  Status  Proposed Name');
+        console.log('  -----  --------  ------  ' + '-'.repeat(40));
+        
+        for (const mapping of proposedMappings) {
+            const trackStr = String(mapping.trackNum).padStart(2);
+            const durationStr = `${mapping.duration} min`.padEnd(8);
+            const statusIcon = mapping.status === 'skip' ? '⏭' : (mapping.duration < 5 || mapping.duration > 60 ? '⚠️' : '✓');
+            const proposedName = mapping.proposedName || 'unknown';
+            console.log(`  ${trackStr}     ${durationStr}  ${statusIcon}     ${proposedName}`);
+        }
+        console.log('');
+    }
+}
+
+// Edit track mapping before ripping
+async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileName) {
+    // Select track
+    const trackChoices = proposedMappings.map(m => {
+        const warn = (m.duration < 5 || m.duration > 60) ? '⚠️ ' : '';
+        const skip = m.status === 'skip' ? '(SKIP) ' : '';
+        return {
+            name: `${warn}${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
+            value: m.trackNum
+        };
+    });
+    
+    const trackSelector = new Select({
+        message: 'Select track to edit:',
+        choices: [...trackChoices, { name: '← Back', value: 'back' }]
+    });
+    
+    const selectedTrack = await trackSelector.run();
+    if (selectedTrack === 'back') return;
+    
+    const mapping = proposedMappings.find(m => m.trackNum === selectedTrack);
+    
+    // Build episode choices
+    const episodeChoices = [];
+    if (metadata.type === 'tv' && metadata.episodes) {
+        metadata.episodes.forEach((ep, idx) => {
+            const seasonNum = String(metadata.season).padStart(2, '0');
+            const episodeNum = String(ep.episode_number).padStart(2, '0');
+            const episodeName = ep.name ? `_${ep.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+            const proposedName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
+            episodeChoices.push({
+                name: `S${seasonNum}E${episodeNum} - ${ep.name} (${ep.runtime}min)`,
+                value: proposedName
+            });
+        });
+    }
+    
+    episodeChoices.push({ name: 'Mark as Extra/Skip', value: 'SKIP' });
+    episodeChoices.push({ name: '← Back', value: 'back' });
+    
+    const assignmentMenu = new Select({
+        message: `Reassign Track ${selectedTrack} to:`,
+        choices: episodeChoices
+    });
+    
+    const assignment = await assignmentMenu.run();
+    if (assignment === 'back') return;
+    
+    if (assignment === 'SKIP') {
+        mapping.status = 'skip';
+        mapping.proposedName = '(will skip)';
+        console.log(`\n  ✓ Track ${selectedTrack} will be skipped\n`);
+        log(`Track ${selectedTrack} marked to skip`);
+    } else {
+        mapping.status = 'pending'; // Still pending but with new name
+        mapping.proposedName = assignment;
+        console.log(`\n  ✓ Track ${selectedTrack} reassigned to: ${assignment}\n`);
+        log(`Track ${selectedTrack} reassigned to: ${assignment}`);
+    }
+}
+
+// Interactive review and mapping function (AFTER ripping - for backwards compatibility)
 async function reviewAndMapEpisodes(proposedMappings, metadata, volumeName, baseFileName, outputDir) {
     console.log('\n' + '━'.repeat(60));
     console.log('  📋 Review Track Mappings');
@@ -1529,20 +1672,51 @@ async function ripAllTracks() {
             baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
         }
 
+        // Build proposed mappings with track info before ripping
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
-            // Use generic track names during ripping
-            const trackFileName = sprintf('track_%02d', titleNumber);
-            
-            // Get track duration for categorization
             const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
-            
-            // Calculate proposed name
             const proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
-
-            console.log(`  ⚙️  Track ${titleNumber} of ${numTitles}: ${trackFileName}.mp4`);
+            
+            proposedMappings.push({
+                trackNum: titleNumber,
+                filename: null, // Will be set during ripping
+                proposedName: proposedName,
+                fileSize: 0, // Unknown until ripped
+                duration: trackDuration || 0,
+                status: 'pending' // pending, skip, or final name
+            });
+        }
+        
+        // Interactive review BEFORE ripping
+        console.log('');
+        const mappingsToRip = await reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName);
+        
+        if (!mappingsToRip || mappingsToRip.length === 0) {
+            console.log('');
+            console.log('  ℹ️  Ripping cancelled.');
+            console.log('');
+            return;
+        }
+        
+        console.log('');
+        console.log('━'.repeat(60));
+        console.log('  🎬 Starting rip...');
+        console.log('━'.repeat(60));
+        console.log('');
+        
+        // Rip only the tracks that weren't marked as skip
+        for (const mapping of mappingsToRip) {
+            if (mapping.status === 'skip') {
+                continue;
+            }
+            
+            const titleNumber = mapping.trackNum;
+            const finalFileName = mapping.status; // status contains the final filename
+            
+            console.log(`  ⚙️  Track ${titleNumber} of ${numTitles}: ${finalFileName}`);
 
             try {
-                await ripDvd(titleNumber, trackFileName, titleNumber, numTitles, (progress, elapsed, remaining, trackNum, totalTracks) => {
+                await ripDvd(titleNumber, finalFileName.replace('.mp4', ''), titleNumber, numTitles, (progress, elapsed, remaining, trackNum, totalTracks) => {
                     // Overwrite the same line for progress updates
                     const progressBar = createProgressBar(progress);
                     const elapsedStr = formatTime(elapsed);
@@ -1553,24 +1727,9 @@ async function ripAllTracks() {
                 // Clear the progress line and show completion
                 process.stdout.write('\r' + ' '.repeat(100) + '\r');
                 console.log(`      ${createProgressBar(100)} | Complete!`);
-                const relativePath = path.relative(process.cwd(), path.join(options.outputDir, `${trackFileName}.mp4`));
+                const relativePath = path.relative(process.cwd(), path.join(options.outputDir, finalFileName));
                 console.log(`      ✓ Saved to ${relativePath}`);
                 console.log('');
-                
-                // Add to proposed mappings
-                const filePath = path.join(options.outputDir, `${trackFileName}.mp4`);
-                const fileStats = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
-                const fileSize = fileStats ? fileStats.size : 0;
-                const duration = trackDuration || 0;
-                
-                proposedMappings.push({
-                    trackNum: titleNumber,
-                    filename: `${trackFileName}.mp4`,
-                    proposedName: proposedName,
-                    fileSize: fileSize,
-                    duration: duration,
-                    status: 'rename'
-                });
                 
                 successCount++;
             } catch (error) {
@@ -1597,10 +1756,11 @@ async function ripAllTracks() {
         }
 
         console.log('━'.repeat(60));
-        if (successCount === numTitles) {
+        const totalToRip = mappingsToRip.filter(m => m.status !== 'skip').length;
+        if (successCount === totalToRip) {
             console.log('  ⚡ All tracks ripped successfully!');
         } else if (successCount > 0) {
-            console.log(`  ⚡ Ripping complete: ${successCount} of ${numTitles} tracks successful`);
+            console.log(`  ⚡ Ripping complete: ${successCount} of ${totalToRip} tracks successful`);
             if (skippedTracks.length > 0) {
                 console.log('');
                 console.log(`  ℹ️  Skipped ${skippedTracks.length} track(s):`);
@@ -1614,14 +1774,10 @@ async function ripAllTracks() {
         console.log('━'.repeat(60));
         console.log('');
         
-        // Interactive review if we have successfully ripped tracks
-        if (successCount > 0 && proposedMappings.length > 0) {
-            const finalized = await reviewAndMapEpisodes(proposedMappings, metadata, volumeName, baseFileName, options.outputDir);
-            if (finalized) {
-                log('Interactive mapping completed and finalized');
-            } else {
-                log('Interactive mapping cancelled - keeping generic track names');
-            }
+        log('Ripping completed');
+        log(`Successfully ripped: ${successCount}/${totalToRip} tracks`);
+        if (skippedTracks.length > 0) {
+            log(`Failed tracks: ${JSON.stringify(skippedTracks)}`);
         }
         
         console.log('');
