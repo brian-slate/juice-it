@@ -1200,19 +1200,9 @@ async function getNumberOfTitles() {
         });
 
         let output = '';
-        let progressDots = 0;
+        let lastTrackShown = 0;
+        let totalTracks = 0;
         
-        // Show progress dots every 2 seconds
-        const progressInterval = setInterval(() => {
-            if (!options.verbose) {
-                process.stdout.write('.');
-                progressDots++;
-                if (progressDots % 20 === 0) {
-                    process.stdout.write('\n                    ');
-                }
-            }
-        }, 2000);
-
         handbrakeProcess.stdout.on('data', function(data) {
             const dataStr = data.toString();
             if (options.verbose) {
@@ -1226,11 +1216,24 @@ async function getNumberOfTitles() {
             if (options.verbose) {
                 process.stdout.write(dataStr);
             } else {
-                // Show progress when HandBrake outputs title info
-                if (dataStr.includes('+ title')) {
-                    clearInterval(progressInterval);
-                    process.stdout.write(' parsing tracks');
-                    progressDots = 0;
+                // Extract total number of titles
+                const totalMatch = dataStr.match(/scan: DVD has (\d+) title/);
+                if (totalMatch) {
+                    totalTracks = parseInt(totalMatch[1], 10);
+                }
+                
+                // Show which track is being scanned
+                const trackMatch = dataStr.match(/scan: scanning title (\d+)/);
+                if (trackMatch) {
+                    const currentTrack = parseInt(trackMatch[1], 10);
+                    if (currentTrack !== lastTrackShown) {
+                        if (lastTrackShown === 0) {
+                            process.stdout.write('\n   ');
+                        }
+                        // Clear previous progress and show new
+                        process.stdout.write(`\r   Scanning track ${currentTrack}${totalTracks > 0 ? `/${totalTracks}` : ''}...`);
+                        lastTrackShown = currentTrack;
+                    }
                 }
             }
             output += dataStr;
@@ -1238,15 +1241,15 @@ async function getNumberOfTitles() {
 
         // Use 'exit' event instead of 'close' for better compatibility with verbose output
         handbrakeProcess.on('exit', (exitCode) => {
-            clearInterval(progressInterval);
             // Give a small delay to ensure all output is captured
             setTimeout(() => {
             if (exitCode === 0) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
                     const numTitles = parseInt(match[1], 10);
-                    if (!options.verbose && progressDots > 0) {
-                        process.stdout.write(' ');
+                    // Clear the progress line
+                    if (!options.verbose && lastTrackShown > 0) {
+                        process.stdout.write('\r' + ' '.repeat(50) + '\r');
                     }
                     console.log(`✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
                     console.log('');
