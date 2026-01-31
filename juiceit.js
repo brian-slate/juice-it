@@ -362,11 +362,11 @@ ${JSON.stringify(contentInfo, null, 2)}
 
 Task: Map each DVD track to an episode or mark as skip.
 Consider:
-- Match track durations to episode runtimes (allow ±5 min variance)
-- Tracks < 5min are likely menus/extras (mark skip)
-- Tracks > 90min are likely full disc (mark skip unless movie)
+- Match track durations to episode runtimes (allow reasonable variance, typically ±5-10 minutes)
+- Mark tracks as skip ONLY if they clearly don't match any episode runtime (e.g., very short menu screens or duplicates)
 - Handle non-sequential layouts (episodes may not align with track order)
-- Some discs have menus between episodes
+- Some discs have menus/extras interspersed between episodes
+- Base skip decisions primarily on whether duration matches expected episode runtimes, not arbitrary thresholds
 
 Respond with JSON only:
 {
@@ -1609,14 +1609,15 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
         const trackStr = String(mapping.trackNum).padStart(2);
         const durationStr = `${mapping.duration} min`.padEnd(8);
         
-        // Status icon based on AI confidence or duration
+        // Status icon based on AI confidence or status
         let statusIcon;
         if (mapping.status === 'skip') {
             statusIcon = '⏭';
         } else if (mapping.aiConfidence !== null) {
             statusIcon = mapping.aiConfidence >= 0.7 ? '✓' : '⚠️';
         } else {
-            statusIcon = (mapping.duration < 5 || mapping.duration > 60) ? '⚠️' : '✓';
+            // No AI, no hardcoded rules - just mark as pending
+            statusIcon = '✓';
         }
         
         const proposedName = mapping.proposedName || 'unknown';
@@ -1689,7 +1690,7 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
         for (const mapping of proposedMappings) {
             const trackStr = String(mapping.trackNum).padStart(2);
             const durationStr = `${mapping.duration} min`.padEnd(8);
-            const statusIcon = mapping.status === 'skip' ? '⏭' : (mapping.duration < 5 || mapping.duration > 60 ? '⚠️' : '✓');
+            const statusIcon = mapping.status === 'skip' ? '⏭' : '✓';
             const proposedName = mapping.proposedName || 'unknown';
             console.log(`  ${trackStr}     ${durationStr}  ${statusIcon}     ${proposedName}`);
         }
@@ -1702,10 +1703,9 @@ async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileNam
     try {
         // Select track
         const trackChoices = proposedMappings.map(m => {
-            const warn = (m.duration < 5 || m.duration > 60) ? '⚠️ ' : '';
             const skip = m.status === 'skip' ? '(SKIP) ' : '';
             return {
-                name: `${warn}${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
+                name: `${skip}Track ${m.trackNum}: ${m.proposedName || 'unknown'} (${m.duration}min)`,
                 value: m.trackNum
             };
         });
