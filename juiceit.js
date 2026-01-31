@@ -27,6 +27,7 @@
  */
 
 const { execSync, spawn, spawnSync } = require('child_process'); // Ensure spawn is imported
+const pty = require('node-pty');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
@@ -1195,61 +1196,47 @@ async function getNumberOfTitles() {
     return new Promise((resolve, reject) => {
         const args = ['-i', options.dvdSource, '--title', '0', '--scan'];
 
-        const handbrakeProcess = spawn('HandBrakeCLI', args, {
-            stdio: ['ignore', 'pipe', 'pipe']
+        // Use pty.spawn - handles exit event reliably unlike spawn
+        const handbrakeProcess = pty.spawn('HandBrakeCLI', args, {
+            name: 'xterm-color',
+            cols: 80,
+            rows: 30,
+            cwd: process.env.HOME,
+            env: process.env
         });
 
         let output = '';
         let lastTrackShown = 0;
         let totalTracks = 0;
-        
-        handbrakeProcess.stdout.on('data', function(data) {
-            const dataStr = data.toString();
-            if (options.verbose) {
-                process.stdout.write(dataStr);
-            }
-            output += dataStr;
-        });
 
-        handbrakeProcess.stderr.on('data', function(data) {
-            const dataStr = data.toString();
+        handbrakeProcess.on('data', function(data) {
             if (options.verbose) {
-                process.stdout.write(dataStr);
+                process.stdout.write(data);
             } else {
                 // Extract total number of titles
-                const totalMatch = dataStr.match(/scan: DVD has (\d+) title/);
+                const totalMatch = data.match(/scan: DVD has (\d+) title/);
                 if (totalMatch) {
                     totalTracks = parseInt(totalMatch[1], 10);
                 }
                 
                 // Show which track is being scanned
-                const trackMatch = dataStr.match(/scan: scanning title (\d+)/);
+                const trackMatch = data.match(/scan: scanning title (\d+)/);
                 if (trackMatch) {
                     const currentTrack = parseInt(trackMatch[1], 10);
                     if (currentTrack !== lastTrackShown) {
                         if (lastTrackShown === 0) {
                             process.stdout.write('\n   ');
                         }
-                        // Clear previous progress and show new
                         process.stdout.write(`\r   Scanning track ${currentTrack}${totalTracks > 0 ? `/${totalTracks}` : ''}...`);
                         lastTrackShown = currentTrack;
                     }
                 }
             }
-            output += dataStr;
+            output += data;
         });
 
-        let resolved = false;
-        
-        function processResults(exitCode) {
-            if (resolved) return;
-            resolved = true;
-            
-            // Destroy streams to ensure cleanup
-            if (handbrakeProcess.stdout) handbrakeProcess.stdout.destroy();
-            if (handbrakeProcess.stderr) handbrakeProcess.stderr.destroy();
-            
-            if (exitCode === 0 || exitCode === null) {
+        handbrakeProcess.on('exit', (exitCode) => {
+            if (exitCode === 0) {
                 const match = output.match(/scan: DVD has (\d+) title/);
                 if (match) {
                     const numTitles = parseInt(match[1], 10);
@@ -1262,7 +1249,6 @@ async function getNumberOfTitles() {
 
                     // Parse title durations from HandBrakeCLI output
                     const titleDurations = {};
-                    // Match format: "+ title 1:" followed by "  + duration: 00:27:45"
                     const titleMatches = output.matchAll(/\+ title (\d+):[\s\S]*?\+ duration: (\d{2}):(\d{2}):(\d{2})/g);
                     for (const titleMatch of titleMatches) {
                         const titleNum = parseInt(titleMatch[1], 10);
@@ -1313,11 +1299,6 @@ async function getNumberOfTitles() {
             } else {
                 reject(`HandBrakeCLI process exited with code ${exitCode}`);
             }
-        }
-
-        // Use 'exit' event - fires when process exits, before streams close
-        handbrakeProcess.on('exit', (exitCode) => {
-            processResults(exitCode);
         });
     });
 }
