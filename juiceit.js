@@ -174,6 +174,182 @@ async function validateOpenAiApiKey(apiKey) {
     }
 }
 
+// ==================== AI HELPERS ====================
+
+// Call OpenAI with error handling and timeout
+async function callOpenAI(systemMessage, userMessage) {
+    try {
+        const config = loadConfig();
+        if (!config.openaiApiKey) {
+            return null;
+        }
+        
+        const openai = new OpenAI({ 
+            apiKey: config.openaiApiKey,
+            timeout: 30000 // 30 second timeout
+        });
+        
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: systemMessage },
+                { role: 'user', content: userMessage }
+            ],
+            temperature: 0.1,
+            response_format: { type: 'json_object' }
+        });
+        
+        const content = response.choices[0].message.content;
+        return JSON.parse(content);
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`\nAI error: ${error.message}`);
+        }
+        log(`AI API error: ${error.message}`);
+        return null;
+    }
+}
+
+// AI-powered TMDB match selection
+async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults) {
+    try {
+        console.log('\n🤖 Using AI to analyze disc and select best match...');
+        
+        const systemMessage = `You are an expert at analyzing DVD disc metadata to identify TV shows and movies. 
+You must respond with valid JSON only.`;
+        
+        const tmdbData = {
+            movies: movieResults.slice(0, 5).map(m => ({
+                id: m.id,
+                title: m.title,
+                year: m.release_date ? m.release_date.split('-')[0] : null,
+                overview: m.overview ? m.overview.substring(0, 200) : ''
+            })),
+            tvShows: tvResults.slice(0, 5).map(s => ({
+                id: s.id,
+                name: s.name,
+                firstAirYear: s.first_air_date ? s.first_air_date.split('-')[0] : null,
+                overview: s.overview ? s.overview.substring(0, 200) : ''
+            }))
+        };
+        
+        const userMessage = `Analyze this DVD disc and determine which TMDB entry is correct.
+
+Disc Information:
+- Volume Name: "${volumeName}"
+- Total Tracks: ${numTitles}
+- Track Durations (minutes): ${JSON.stringify(trackDurations)}
+
+TMDB Search Results:
+${JSON.stringify(tmdbData, null, 2)}
+
+Task: Determine which TMDB entry is the correct match.
+Consider:
+- Does the volume name match any title?
+- Does track count suggest TV show (multiple episodes) or movie?
+- Do track durations align with typical TV episode length (~20-45min) or movie length (>90min)?
+
+Respond with JSON only:
+{
+  "selectedId": number or null,
+  "selectedType": "tv" or "movie" or null,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation",
+  "season": number (for TV only, best guess based on disc name)
+}`;
+        
+        const result = await callOpenAI(systemMessage, userMessage);
+        
+        if (result && result.selectedId) {
+            console.log(`   ✓ AI selected: ${result.selectedType === 'tv' ? 'TV' : 'Movie'} (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
+            console.log(`   Reasoning: ${result.reasoning}`);
+            log(`AI TMDB selection: ${JSON.stringify(result)}`);
+        }
+        
+        return result;
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`\nAI selection error: ${error.message}`);
+        }
+        return null;
+    }
+}
+
+// AI-powered track mapping
+async function aiMapTracks(trackDurations, metadata) {
+    try {
+        console.log('\n🤖 Using AI to map tracks to episodes...');
+        
+        const systemMessage = `You are an expert at mapping DVD tracks to TV episodes or movie content.
+You must respond with valid JSON only.`;
+        
+        const trackInfo = Object.entries(trackDurations).map(([trackNum, duration]) => ({
+            trackNum: parseInt(trackNum),
+            duration
+        }));
+        
+        const contentInfo = metadata.type === 'tv' && metadata.episodes ? {
+            type: 'tv',
+            season: metadata.season,
+            episodes: metadata.episodes.map(ep => ({
+                episodeNumber: ep.episode_number,
+                name: ep.name,
+                runtime: ep.runtime
+            }))
+        } : {
+            type: metadata.type,
+            name: metadata.name
+        };
+        
+        const userMessage = `Map DVD tracks to episodes/content.
+
+DVD Track Information:
+${JSON.stringify(trackInfo, null, 2)}
+
+Content Metadata:
+${JSON.stringify(contentInfo, null, 2)}
+
+Task: Map each DVD track to an episode or mark as skip.
+Consider:
+- Match track durations to episode runtimes (allow ±5 min variance)
+- Tracks < 5min are likely menus/extras (mark skip)
+- Tracks > 90min are likely full disc (mark skip unless movie)
+- Handle non-sequential layouts (episodes may not align with track order)
+- Some discs have menus between episodes
+
+Respond with JSON only:
+{
+  "mappings": [
+    {
+      "trackNum": number,
+      "episodeIndex": number or null (0-based index into episodes array),
+      "shouldSkip": boolean,
+      "confidence": 0.0-1.0,
+      "reasoning": "brief explanation"
+    }
+  ],
+  "overallConfidence": 0.0-1.0
+}`;
+        
+        const result = await callOpenAI(systemMessage, userMessage);
+        
+        if (result && result.mappings) {
+            const skipCount = result.mappings.filter(m => m.shouldSkip).length;
+            const mapCount = result.mappings.length - skipCount;
+            console.log(`   ✓ AI mapped ${mapCount} tracks, marked ${skipCount} to skip`);
+            console.log(`   Overall confidence: ${(result.overallConfidence * 100).toFixed(0)}%`);
+            log(`AI track mapping: ${JSON.stringify(result)}`);
+        }
+        
+        return result;
+    } catch (error) {
+        if (options.verbose) {
+            console.log(`\nAI mapping error: ${error.message}`);
+        }
+        return null;
+    }
+}
+
 // Setup workflow for API key configuration
 async function runSetup() {
     console.log('');
@@ -301,7 +477,7 @@ function guessMediaType(numTitles) {
     return numTitles >= 3 ? 'tv' : 'movie';
 }
 
-async function lookupMetadata(volumeName, numTitles) {
+async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
     console.log('\n🔍 Looking up metadata...');
     
     // Clean up the volume name for searching
@@ -313,6 +489,44 @@ async function lookupMetadata(volumeName, numTitles) {
     // Search both movie and TV
     const movieResults = await searchTMDB(cleanName, false);
     const tvResults = await searchTMDB(cleanName, true);
+    
+    // Try AI-powered selection if available and we have track durations
+    const config = loadConfig();
+    if (config.openaiApiKey && trackDurations) {
+        const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults);
+        
+        if (aiSelection && aiSelection.selectedId && aiSelection.confidence >= 0.8) {
+            // AI is confident - use its selection
+            const selectedResult = aiSelection.selectedType === 'tv' 
+                ? tvResults.find(s => s.id === aiSelection.selectedId)
+                : movieResults.find(m => m.id === aiSelection.selectedId);
+            
+            if (selectedResult) {
+                if (aiSelection.selectedType === 'tv') {
+                    const season = aiSelection.season || 1;
+                    const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
+                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}`);
+                    return {
+                        type: 'tv',
+                        name: selectedResult.name,
+                        season: season,
+                        episodes: seasonDetails ? seasonDetails.episodes : null,
+                        aiSelected: true
+                    };
+                } else {
+                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.title}`);
+                    return {
+                        type: 'movie',
+                        name: selectedResult.title,
+                        year: selectedResult.release_date ? selectedResult.release_date.split('-')[0] : null,
+                        aiSelected: true
+                    };
+                }
+            }
+        } else if (aiSelection) {
+            console.log(`\n   ℹ️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%), showing manual selection...`);
+        }
+    }
     
     const choices = [];
     
@@ -1283,21 +1497,48 @@ async function renameExistingFiles() {
 
 // Interactive review BEFORE ripping - returns mappings ready to rip
 async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName) {
+    const hasAI = proposedMappings.some(m => m.aiReasoning);
+    
     console.log('\n' + '━'.repeat(60));
-    console.log('  📋 Review Track Mappings (Before Ripping)');
+    if (hasAI) {
+        console.log('  📋 Review Track Mappings (AI-Enhanced)');
+    } else {
+        console.log('  📋 Review Track Mappings (Before Ripping)');
+    }
     console.log('━'.repeat(60));
     console.log('');
     
-    // Display track table (no file sizes since not ripped yet)
+    // Display track table
     console.log('  Track  Duration  Status  Proposed Name');
     console.log('  -----  --------  ------  ' + '-'.repeat(40));
     
     for (const mapping of proposedMappings) {
         const trackStr = String(mapping.trackNum).padStart(2);
         const durationStr = `${mapping.duration} min`.padEnd(8);
-        const statusIcon = mapping.status === 'skip' ? '⏭' : (mapping.duration < 5 || mapping.duration > 60 ? '⚠️' : '✓');
+        
+        // Status icon based on AI confidence or duration
+        let statusIcon;
+        if (mapping.status === 'skip') {
+            statusIcon = '⏭';
+        } else if (mapping.aiConfidence !== null) {
+            statusIcon = mapping.aiConfidence >= 0.7 ? '✓' : '⚠️';
+        } else {
+            statusIcon = (mapping.duration < 5 || mapping.duration > 60) ? '⚠️' : '✓';
+        }
+        
         const proposedName = mapping.proposedName || 'unknown';
         console.log(`  ${trackStr}     ${durationStr}  ${statusIcon}     ${proposedName}`);
+        
+        // Show AI reasoning if available
+        if (mapping.aiReasoning && options.verbose) {
+            console.log(`         AI: ${mapping.aiReasoning} (${(mapping.aiConfidence * 100).toFixed(0)}% confidence)`);
+        }
+    }
+    
+    if (hasAI) {
+        console.log('');
+        console.log('  ✨ AI has analyzed and mapped tracks automatically');
+        console.log('  ℹ️  Use --verbose to see AI reasoning for each track');
     }
     
     console.log('');
@@ -1692,10 +1933,10 @@ async function ripAllTracks() {
             return;
         }
         
-        // Lookup metadata unless disabled
+        // Lookup metadata unless disabled (pass track durations for AI)
         let metadata = null;
         if (!options.noLookup) {
-            metadata = await lookupMetadata(volumeName, numTitles);
+            metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations);
         } else {
             metadata = { type: 'disc', volumeName };
         }
@@ -1757,10 +1998,41 @@ async function ripAllTracks() {
             baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
         }
 
+        // Try AI-powered track mapping if available
+        const config = loadConfig();
+        let aiMappingResult = null;
+        if (config.openaiApiKey && global.dvdTitleDurations && metadata.type === 'tv') {
+            aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata);
+        }
+        
         // Build proposed mappings with track info before ripping
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
             const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
-            const proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+            let proposedName;
+            let status = 'pending';
+            let aiReasoning = null;
+            let aiConfidence = null;
+            
+            // Use AI mapping if available
+            if (aiMappingResult && aiMappingResult.mappings) {
+                const aiMapping = aiMappingResult.mappings.find(m => m.trackNum === titleNumber);
+                if (aiMapping) {
+                    if (aiMapping.shouldSkip) {
+                        status = 'skip';
+                        proposedName = '(will skip)';
+                    } else if (aiMapping.episodeIndex !== null && metadata.episodes && metadata.episodes[aiMapping.episodeIndex]) {
+                        proposedName = calculateProposedName(aiMapping.episodeIndex, metadata, baseFileName, numTitles);
+                    } else {
+                        proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+                    }
+                    aiReasoning = aiMapping.reasoning;
+                    aiConfidence = aiMapping.confidence;
+                } else {
+                    proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+                }
+            } else {
+                proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+            }
             
             proposedMappings.push({
                 trackNum: titleNumber,
@@ -1768,7 +2040,9 @@ async function ripAllTracks() {
                 proposedName: proposedName,
                 fileSize: 0, // Unknown until ripped
                 duration: trackDuration || 0,
-                status: 'pending' // pending, skip, or final name
+                status: status,
+                aiReasoning: aiReasoning,
+                aiConfidence: aiConfidence
             });
         }
         
