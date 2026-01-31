@@ -817,7 +817,12 @@ args.forEach((arg, index) => {
 // Helper function to set default output directory
 function setDefaultOutputDir(volumeName) {
     if (!options.outputDir) {
-        const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        // Use local date instead of UTC
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const timestamp = `${year}-${month}-${day}`; // YYYY-MM-DD in local time
         const safeName = volumeName.replace(/[^a-zA-Z0-9_-]/g, '_');
         options.outputDir = path.join(process.cwd(), `${safeName}_${timestamp}`);
     }
