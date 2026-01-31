@@ -2,6 +2,18 @@
 
 Quick reference for development and testing commands.
 
+## Quick Reference
+
+You can use either `make` commands or `npm` scripts:
+
+```bash
+make help      # Show all make targets
+make test      # Run tests
+make demo      # Run demo
+make install   # Update Homebrew installation
+make release   # Create release
+```
+
 ## Testing
 
 ### Run Automated Tests
