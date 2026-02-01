@@ -1,4 +1,4 @@
-.PHONY: help test test-core test-prompts test-runtime test-openai demo install reinstall reinstall-release release diagnose
+.PHONY: help test test-core test-prompts test-runtime test-openai demo install reinstall reinstall-release release release-minor release-major diagnose
 
 help:
 	@echo "JuiceIt Development Commands"
@@ -13,7 +13,9 @@ help:
 	@echo "  make diagnose          - Run diagnostic mode (analyze disc and mapping)"
 	@echo "  make reinstall         - Link to local code (npm link, runs tests first)"
 	@echo "  make reinstall-release - Install from latest GitHub release"
-	@echo "  make release           - Create a new release (see RELEASE.md)"
+	@echo "  make release           - Create patch release (tests, tags, pushes, updates Homebrew)"
+	@echo "  make release-minor     - Create minor release"
+	@echo "  make release-major     - Create major release"
 	@echo ""
 	@echo "Local Development:"
 	@echo "  1. make reinstall      (links local code, changes are instant)"
@@ -54,17 +56,10 @@ reinstall-release:
 	@./bin/update-homebrew.sh --release
 
 release:
-	@echo "Creating release..."
-	@echo ""
-	@echo "This will run 'npm run release' which requires:"
-	@echo "  - Version bumped in package.json"
-	@echo "  - GitHub CLI (gh) installed"
-	@echo ""
-	@echo "For manual release process, see RELEASE.md"
-	@echo ""
-	@read -p "Continue? (y/N) " answer; \
-	if [ "$$answer" = "y" ] || [ "$$answer" = "Y" ]; then \
-		npm run release; \
-	else \
-		echo "Cancelled. See RELEASE.md for manual process."; \
-	fi
+	@./bin/release.sh patch
+
+release-minor:
+	@./bin/release.sh minor
+
+release-major:
+	@./bin/release.sh major
