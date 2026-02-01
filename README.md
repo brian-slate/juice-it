@@ -217,50 +217,72 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Development
 
-Contributing to JuiceIt? Here's how to test your changes:
+Contributing to JuiceIt? See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
-### Local Testing Workflow
+### Quick Start
 
 ```bash
 # 1. Make your changes
 vim juiceit.js
 
-# 2. Commit
-git add -A
-git commit -m "Your message"
+# 2. Run tests
+npm test
 
-# 3. Update Homebrew installation
+# 3. Commit and update Homebrew
+git add -A && git commit -m "Your message"
 ./bin/update-homebrew.sh
 
 # 4. Test
 juiceit --help
 ```
 
+### Logging Guidelines
+
+JuiceIt uses a structured logging approach:
+
+```javascript
+// For debug output (shown with --verbose, always logged to file)
+const { getLogger } = require('./lib/logger');
+logger.debug('Processing...');
+logger.error('Something failed');  // Always shown
+
+// For user-facing output (progress, status, formatted text)
+console.log('  ✓ Task completed');
+```
+
+**Important**: Use `logger.debug()` instead of `if (options.verbose) console.log()`.
+
+### Future: UI Library
+
+The project has a UI library (`lib/ui.js`) prepared for future use. Migration triggers:
+- Need for `--quiet` or `--json` output modes
+- Terminal compatibility issues (Windows, piping)
+- Console.log count exceeds ~700 calls
+- Need for advanced progress indicators
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the migration plan.
+
 ### Testing
 
 ```bash
-# Run automated tests
-npm test
-
-# Try the interactive demo
-npm run demo
-
-# Test with a real DVD
-juiceit --scan-only
+npm test              # Run all tests
+npm run test:core     # Core functionality only
+npm run demo          # Interactive demo
+juiceit --scan-only   # Test with real DVD
+juiceit --diagnose    # Detailed diagnostic output
 ```
 
 ### Documentation
 
+- `CONTRIBUTING.md` - Development guidelines and logging/UI architecture
 - `NPM_COMMANDS.md` - All npm scripts and testing commands
 - `RELEASE.md` - How to create a new release
-- `PUBLISH_TAP.md` - Publishing your tap to GitHub (recommended)
-- `HOMEBREW_DISTRIBUTION.md` - Advanced distribution options
-- `COMPLETION_SUMMARY.md` - Implementation details
-- `IMPLEMENTATION_PLAN_*.md` - Feature specifications
+- `PUBLISH_TAP.md` - Publishing your tap to GitHub
+- `.claude/CLAUDE.md` - AI assistant instructions
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first, then open an issue or submit a pull request.
 
 ## Acknowledgments
 
