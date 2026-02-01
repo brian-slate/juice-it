@@ -1,6 +1,7 @@
 # Node
 node_modules/
 npm-debug.log
+package-lock.json
 
 # Output directories (test rips)
 *_20*-*-*/
@@ -12,11 +13,15 @@ npm-debug.log
 **/.DS_Store
 .AppleDouble
 .LSOverride
+._*
+.Spotlight-V100
+.Trashes
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
+*.bak
 
 # IDE
 .vscode/
@@ -24,3 +29,27 @@ npm-debug.log
 *.swp
 *.swo
 *~
+.project
+.classpath
+.settings/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Debug files
+*.debug
+debug-*.js

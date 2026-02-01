@@ -1285,7 +1285,18 @@ if (options.runSetup) {
 
     // Fallback if no DVD source is detected
     if (!options.dvdSource) {
-        console.error("No DVD source detected. Please provide a valid DVD source using --dvdSource.");
+        console.log('');
+        console.log('  ❌ No DVD Detected');
+        console.log('');
+        console.log('  Could not find a DVD drive with a disc inserted.');
+        console.log('');
+        console.log('  What you can try:');
+        console.log('    1. Make sure a DVD is inserted and the disc has finished loading');
+        console.log('    2. Wait a few seconds and try again');
+        console.log('    3. Manually specify the DVD path: juiceit --dvdSource /dev/diskN');
+        console.log('');
+        console.log('  To find your DVD device, run: diskutil list');
+        console.log('');
         process.exit(1);
     }
 
@@ -2411,7 +2422,20 @@ async function ripAllTracks() {
         const numTitles = await getNumberOfTitles(); // Get the number of titles
 
         if (numTitles === 0) {
-            console.log('❌ No titles found on disc. Exiting.\n');
+            console.log('');
+            console.log('  ❌ No Titles Found');
+            console.log('');
+            console.log('  Could not find any video titles on this disc.');
+            console.log('');
+            console.log('  Possible causes:');
+            console.log('    • The disc may be damaged or dirty');
+            console.log('    • The disc format may not be supported');
+            console.log('    • The disc may still be loading (wait and try again)');
+            console.log('');
+            console.log('  What you can try:');
+            console.log('    1. Clean the disc and try again');
+            console.log('    2. Run with --verbose for more details: juiceit --verbose');
+            console.log('');
             log('No titles found on disc');
             return;
         }
@@ -2572,74 +2596,129 @@ async function ripAllTracks() {
 
                 // Attempt AI mapping with retry loop on failure
                 let retryAttempt = 0;
+                const maxAutoRetries = 2; // Auto-retry up to 2 times in automatic mode
+
                 while (!aiMappingResult && !useSequentialMapping) {
                     aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata);
 
                     if (!aiMappingResult) {
                         log('ERROR: AI mapping failed');
-                        console.log('');
-                        console.log('  ❌ AI mapping failed!');
-                        console.log('');
 
-                        // Ask user what to do
-                        const failureMenu = new Select({
-                            message: 'How would you like to proceed?',
-                            choices: [
-                                { name: 'Retry AI mapping', value: 'retry' },
-                                { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - NOT RECOMMENDED', value: 'sequential' },
-                                { name: 'Cancel and exit', value: 'cancel' }
-                            ]
-                        });
+                        if (options.interactive) {
+                            // Interactive mode: ask user what to do
+                            console.log('');
+                            console.log('  ❌ AI mapping failed!');
+                            console.log('');
 
-                        try {
-                            const choice = await failureMenu.run();
-                            if (choice === 'retry') {
-                                retryAttempt++;
-                                console.log(`\n  🔄 Retrying AI mapping (attempt ${retryAttempt + 1})...\n`);
-                                log(`Retrying AI mapping, attempt ${retryAttempt + 1}`);
-                                continue;
-                            } else if (choice === 'sequential') {
-                                console.log('\n  ⚠️  Using sequential mapping - this may produce incorrect results!\n');
-                                log('User chose sequential mapping after AI failure');
-                                useSequentialMapping = true;
-                            } else {
+                            const failureMenu = new Select({
+                                message: 'How would you like to proceed?',
+                                choices: [
+                                    { name: 'Retry AI mapping', value: 'retry' },
+                                    { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - NOT RECOMMENDED', value: 'sequential' },
+                                    { name: 'Cancel and exit', value: 'cancel' }
+                                ]
+                            });
+
+                            try {
+                                const choice = await failureMenu.run();
+                                if (choice === 'retry') {
+                                    retryAttempt++;
+                                    console.log(`\n  🔄 Retrying AI mapping (attempt ${retryAttempt + 1})...\n`);
+                                    log(`Retrying AI mapping, attempt ${retryAttempt + 1}`);
+                                    continue;
+                                } else if (choice === 'sequential') {
+                                    console.log('\n  ⚠️  Using sequential mapping - this may produce incorrect results!\n');
+                                    log('User chose sequential mapping after AI failure');
+                                    useSequentialMapping = true;
+                                } else {
+                                    console.log('\n  ✓ Cancelled.\n');
+                                    return;
+                                }
+                            } catch (err) {
                                 console.log('\n  ✓ Cancelled.\n');
                                 return;
                             }
-                        } catch (err) {
-                            console.log('\n  ✓ Cancelled.\n');
-                            return;
+                        } else {
+                            // Automatic mode: auto-retry a few times, then fallback
+                            retryAttempt++;
+                            if (retryAttempt <= maxAutoRetries) {
+                                console.log(`  ⚠️  AI mapping failed, retrying (${retryAttempt}/${maxAutoRetries})...`);
+                                log(`Auto-retrying AI mapping, attempt ${retryAttempt}`);
+                                continue;
+                            }
+
+                            // All retries exhausted - fallback to sequential
+                            console.log('');
+                            console.log('  ⚠️  AI Mapping Failed');
+                            console.log('');
+                            console.log('  The AI could not map DVD tracks to episodes.');
+                            console.log('  This can happen due to network issues or API problems.');
+                            console.log('');
+                            console.log('  Falling back to sequential mapping (Track 1→Episode 1, etc.)');
+                            console.log('');
+                            console.log('  ⚠️  WARNING: Episode assignments may be incorrect!');
+                            console.log('');
+                            console.log('  For better results, try:');
+                            console.log('    • Run again later (if this was a temporary issue)');
+                            console.log('    • Run: juiceit --interactive  (to manually verify assignments)');
+                            console.log('');
+                            log('Auto mode: AI mapping failed, using sequential fallback');
+                            useSequentialMapping = true;
+                            global.autoModeWarnings = global.autoModeWarnings || [];
+                            global.autoModeWarnings.push('AI mapping failed - used sequential mapping (episodes may be mislabeled)');
                         }
                     }
                 }
             } else if (metadata.type === 'tv' && !config.openaiApiKey) {
-                // No AI key configured - warn user and ask what to do
-                console.log('');
-                console.log('  ⚠️  AI mapping not available (no OpenAI API key configured)');
-                console.log('  ⚠️  Without AI, track-to-episode mapping may be incorrect.');
-                console.log('');
+                // No AI key configured
+                if (options.interactive) {
+                    // Interactive mode: ask user what to do
+                    console.log('');
+                    console.log('  ⚠️  AI mapping not available (no OpenAI API key configured)');
+                    console.log('  ⚠️  Without AI, track-to-episode mapping may be incorrect.');
+                    console.log('');
 
-                const noAiMenu = new Select({
-                    message: 'How would you like to proceed?',
-                    choices: [
-                        { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - may be incorrect', value: 'sequential' },
-                        { name: 'Cancel and configure AI (run: juiceit --setup)', value: 'cancel' }
-                    ]
-                });
+                    const noAiMenu = new Select({
+                        message: 'How would you like to proceed?',
+                        choices: [
+                            { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - may be incorrect', value: 'sequential' },
+                            { name: 'Cancel and configure AI (run: juiceit --setup)', value: 'cancel' }
+                        ]
+                    });
 
-                try {
-                    const choice = await noAiMenu.run();
-                    if (choice === 'sequential') {
-                        console.log('\n  ⚠️  Using sequential mapping...\n');
-                        log('User chose sequential mapping (no AI key)');
-                        useSequentialMapping = true;
-                    } else {
-                        console.log('\n  ℹ️  Run `juiceit --setup` to configure your OpenAI API key.\n');
+                    try {
+                        const choice = await noAiMenu.run();
+                        if (choice === 'sequential') {
+                            console.log('\n  ⚠️  Using sequential mapping...\n');
+                            log('User chose sequential mapping (no AI key)');
+                            useSequentialMapping = true;
+                        } else {
+                            console.log('\n  ℹ️  Run `juiceit --setup` to configure your OpenAI API key.\n');
+                            return;
+                        }
+                    } catch (err) {
+                        console.log('\n  ✓ Cancelled.\n');
                         return;
                     }
-                } catch (err) {
-                    console.log('\n  ✓ Cancelled.\n');
-                    return;
+                } else {
+                    // Automatic mode: continue with sequential mapping, but warn clearly
+                    console.log('');
+                    console.log('  ⚠️  No AI Configured');
+                    console.log('');
+                    console.log('  AI-powered episode mapping is not available.');
+                    console.log('  Using sequential mapping (Track 1→Episode 1, Track 2→Episode 2, etc.)');
+                    console.log('');
+                    console.log('  ⚠️  WARNING: This may result in incorrect episode assignments!');
+                    console.log('     DVDs often have menus, extras, or out-of-order episodes.');
+                    console.log('');
+                    console.log('  For better results:');
+                    console.log('    • Run: juiceit --setup  (to add OpenAI API key)');
+                    console.log('    • Or run: juiceit --interactive  (to manually review assignments)');
+                    console.log('');
+                    log('Auto mode: Using sequential mapping (no AI key configured)');
+                    useSequentialMapping = true;
+                    global.autoModeWarnings = global.autoModeWarnings || [];
+                    global.autoModeWarnings.push('No AI configured - used sequential mapping (episodes may be mislabeled)');
                 }
             } else {
                 // Movie or no track durations - sequential is fine
@@ -2822,6 +2901,25 @@ async function ripAllTracks() {
         
         if (skippedTracks.length > 0) {
             console.log('  💡 Check the log file for detailed error information');
+            console.log('');
+        }
+
+        // Show summary of any automatic mode warnings
+        if (global.autoModeWarnings && global.autoModeWarnings.length > 0) {
+            console.log('━'.repeat(60));
+            console.log('  ⚠️  IMPORTANT - Review Needed');
+            console.log('━'.repeat(60));
+            console.log('');
+            console.log('  The following issues occurred during automatic processing:');
+            console.log('');
+            global.autoModeWarnings.forEach(warning => {
+                console.log(`    • ${warning}`);
+            });
+            console.log('');
+            console.log('  Recommendations:');
+            console.log('    1. Review the ripped files to verify they are correct');
+            console.log('    2. For more control, use: juiceit --interactive');
+            console.log('    3. For AI-powered mapping, run: juiceit --setup');
             console.log('');
         }
     } catch (error) {
