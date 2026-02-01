@@ -42,37 +42,29 @@ const { TmdbMatchSchema, TrackMappingResponseSchema } = require('./prompts/schem
 // AI configuration
 const aiConfig = require('./config/ai-config');
 
+// Logger
+const { getLogger } = require('./lib/logger');
+
 // ==================== LOGGING ====================
 
-let logStream = null;
+// Global logger instance - initialized after options are parsed
+let logger = null;
 const skippedTracks = [];
 
+// Legacy functions that wrap the new logger (for gradual migration)
 function initializeLog(outputDir, volumeName) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const logFileName = `juiceit_${volumeName}_${timestamp}.log`;
-    const logFilePath = path.join(outputDir, logFileName);
-    logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
-    log(`JuiceIt DVD Ripper Log`);
-    log(`DVD: ${volumeName}`);
-    log(`Started: ${new Date().toISOString()}`);
-    log(`Output Directory: ${outputDir}`);
-    log('='.repeat(70));
-    return logFilePath;
+    return logger.initFileLogging(outputDir, volumeName);
 }
 
 function log(message) {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] ${message}\n`;
-    if (logStream) {
-        logStream.write(logMessage);
+    if (logger) {
+        logger.fileOnly(message);
     }
 }
 
 function closeLog() {
-    if (logStream) {
-        log('='.repeat(70));
-        log(`Finished: ${new Date().toISOString()}`);
-        logStream.end();
+    if (logger) {
+        logger.close();
     }
 }
 
@@ -920,8 +912,14 @@ args.forEach((arg, index) => {
         options.interactive = true; // Enable interactive mode for manual review/selection
     } else if (arg === '--diagnose') {
         options.diagnose = true; // Run diagnostic mode - detailed mapping analysis
+    } else if (arg === '--raw') {
+        options.rawMode = true; // Raw rip mode - skip all metadata/AI, just rip tracks
+        options.noLookup = true; // Implied: skip metadata lookup
     }
 });
+
+// Initialize the logger with verbosity setting
+logger = getLogger({ verbose: options.verbose });
 
 // Helper function to set default output directory
 function setDefaultOutputDir(volumeName) {
@@ -1203,27 +1201,52 @@ function detectAllDvdDrives() {
 // Function to detect the DVD source automatically
 async function detectDvdSource() {
     const drives = detectAllDvdDrives();
-    
+
     if (drives.length === 0) {
         return null;
     } else if (drives.length === 1) {
+        logger.debug(`Single DVD drive detected: ${drives[0].device}`);
         return drives[0].device;
     } else {
-        // Multiple drives found - show interactive selection
+        // Multiple drives found
+        logger.debug(`Multiple DVD drives detected: ${drives.length}`);
+
+        if (!options.interactive) {
+            // Automatic mode: cannot proceed with multiple drives
+            console.log('');
+            console.log('  ❌ Multiple DVD Drives Detected');
+            console.log('');
+            console.log('  Found more than one DVD drive with a disc inserted:');
+            console.log('');
+            drives.forEach(d => {
+                console.log(`    • ${d.device} - "${d.name}" (${d.size})`);
+            });
+            console.log('');
+            console.log('  In automatic mode, JuiceIt cannot determine which disc to rip.');
+            console.log('');
+            console.log('  Options:');
+            console.log('    1. Specify the drive: juiceit --dvdSource /dev/diskN');
+            console.log('    2. Use interactive mode: juiceit --interactive');
+            console.log('       (This will let you select the disc to rip)');
+            console.log('');
+            process.exit(1);
+        }
+
+        // Interactive mode: show selection prompt
         console.log('\n📀 Multiple DVD drives detected:\n');
-        
+
         const choices = drives.map(d => ({
             name: `${d.device} - "${d.name}" (${d.size})`,
             value: d.device
         }));
-        
+
         try {
             const prompt = new Select({
                 name: 'drive',
                 message: 'Select DVD drive:',
                 choices: choices
             });
-            
+
             return await prompt.run();
         } catch (error) {
             console.log('\nSelection cancelled\n');
@@ -2442,7 +2465,17 @@ async function ripAllTracks() {
         
         // Lookup metadata unless disabled (pass track durations for AI)
         let metadata = null;
-        if (!options.noLookup) {
+        if (options.rawMode) {
+            // Raw mode: skip all metadata lookup, just use simple track names
+            console.log('');
+            console.log('  📀 Raw Rip Mode');
+            console.log('');
+            console.log('  Skipping metadata lookup and AI mapping.');
+            console.log('  Tracks will be named: ' + volumeName + '_1.mp4, ' + volumeName + '_2.mp4, etc.');
+            console.log('');
+            logger.debug('Raw mode enabled - skipping metadata lookup');
+            metadata = { type: 'raw', volumeName };
+        } else if (!options.noLookup) {
             metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations);
         } else {
             metadata = { type: 'disc', volumeName };
@@ -2780,16 +2813,60 @@ async function ripAllTracks() {
                 aiConfidence: aiConfidence
             });
         }
+
+            // Check for episode mapping mismatches (TV shows only)
+            if (metadata.type === 'tv' && metadata.episodes && aiMappingResult && aiMappingResult.mappings) {
+                const expectedEpisodes = metadata.episodes.length;
+                const mappedEpisodes = aiMappingResult.mappings.filter(m => !m.shouldSkip && m.episodeIndex !== null);
+                const uniqueMappedEpisodes = new Set(mappedEpisodes.map(m => m.episodeIndex)).size;
+
+                if (uniqueMappedEpisodes < expectedEpisodes) {
+                    const missingCount = expectedEpisodes - uniqueMappedEpisodes;
+                    logger.warn(`Episode mismatch: ${uniqueMappedEpisodes}/${expectedEpisodes} episodes mapped`);
+
+                    if (!options.interactive) {
+                        // Auto mode: warn but continue
+                        console.log('');
+                        console.log('  ⚠️  Episode Mapping Mismatch');
+                        console.log('');
+                        console.log(`  TMDB shows ${expectedEpisodes} episodes for this season,`);
+                        console.log(`  but only ${uniqueMappedEpisodes} episodes were found on the disc.`);
+                        console.log('');
+                        console.log('  Possible causes:');
+                        console.log('    • This disc may only contain part of the season');
+                        console.log('    • AI may have selected the wrong TV show/season');
+                        console.log('    • TMDB may have incomplete data for this disc');
+                        console.log('');
+                        console.log('  Continuing with available mappings...');
+                        console.log('');
+                        global.autoModeWarnings = global.autoModeWarnings || [];
+                        global.autoModeWarnings.push(`Episode mismatch: only ${uniqueMappedEpisodes} of ${expectedEpisodes} episodes found`);
+                    }
+                } else if (uniqueMappedEpisodes > expectedEpisodes) {
+                    logger.warn(`More episodes mapped (${uniqueMappedEpisodes}) than expected (${expectedEpisodes})`);
+                }
+            }
         } // End of "if no plan loaded" block
-        
-        // Interactive review BEFORE ripping (skip if using existing plan directly)
+
+        // Interactive review BEFORE ripping (skip if using existing plan directly or in raw mode)
         let mappingsToRip;
-        const skipReview = existingPlan && proposedMappings.some(m => m.status !== 'pending' && m.status !== 'skip');
-        
+        const skipReview = options.rawMode ||
+            (existingPlan && proposedMappings.some(m => m.status !== 'pending' && m.status !== 'skip'));
+
         if (skipReview) {
-            // Already finalized from existing plan
+            // Raw mode or already finalized from existing plan
             mappingsToRip = proposedMappings;
-            log('Skipping review - using finalized plan');
+            // Finalize all pending mappings for raw mode
+            if (options.rawMode) {
+                for (const mapping of mappingsToRip) {
+                    if (mapping.status === 'pending') {
+                        mapping.status = mapping.proposedName;
+                    }
+                }
+                logger.debug('Raw mode: auto-finalized all track mappings');
+            } else {
+                log('Skipping review - using finalized plan');
+            }
         } else {
             console.log('');
             mappingsToRip = await reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeName, baseFileName);
@@ -3407,12 +3484,15 @@ Options:
   --verbose         Show detailed technical output
   --interactive, -i Enable interactive mode for manual review and selection
                     (default: fully automatic with AI-powered decisions)
+  --raw             Raw rip mode - skip metadata lookup and AI mapping
+                    Rips all tracks with simple names (discname_1.mp4, etc.)
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
   node juiceit.js --verbose  # Show detailed HandBrakeCLI output
   node juiceit.js --no-lookup  # Skip metadata lookup and use disc name
   node juiceit.js --rename-only --output ./output  # Rename existing files
+  node juiceit.js --raw  # Quick raw rip without metadata or AI
 `);
 
 }
