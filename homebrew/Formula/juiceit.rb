@@ -2,7 +2,7 @@ class Juiceit < Formula
   desc "Smart DVD ripper with automatic metadata lookup and episode naming"
   homepage "https://github.com/brian-slate/juice-it"
   url "file:///Users/brianslate/code/personal/juice-it", using: :git, branch: "interactive-episode-mapping"
-  version "1.1.0"
+  version "1.2.0"
   license "MIT"
 
   depends_on "node"
