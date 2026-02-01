@@ -1014,7 +1014,7 @@ function getCacheFilePath() {
 function checkHandBrakeCLI() {
     const result = spawnSync('HandBrakeCLI', ['--version']);
     if (result.error || result.status !== 0) {
-        console.error("HandBrakeCLI is not installed. Please install it using 'brew install handbrake' to use this script.");
+        logger.error("HandBrakeCLI is not installed. Please install it using 'brew install handbrake' to use this script.");
         process.exit(1);
     }
 }
@@ -1023,7 +1023,7 @@ function checkHandBrakeCLI() {
 function checkLibdvdcss() {
     const result = spawnSync('brew', ['list', 'libdvdcss']);
     if (result.error || result.status !== 0) {
-        console.error("libdvdcss is not installed. Please install it using 'brew install libdvdcss' to use this script.");
+        logger.error("libdvdcss is not installed. Please install it using 'brew install libdvdcss' to use this script.");
         process.exit(1);
     }
 }
@@ -1192,7 +1192,7 @@ function detectAllDvdDrives() {
         return drives;
     } catch (error) {
         if (options.verbose) {
-            console.error("Error detecting DVD drives:", error);
+            logger.error("Error detecting DVD drives:", error);
         }
         return [];
     }
@@ -1413,7 +1413,7 @@ function getVolumeName() {
         const match = output.match(/Volume Name:\s*(.+)/);
         return match ? match[1].trim() : null; // Return the Volume Name if found
     } catch (error) {
-        console.error("Error fetching volume name:", error);
+        logger.error("Error fetching volume name:", error);
         return null;
     }
 }
@@ -1663,12 +1663,12 @@ async function renameExistingFiles() {
         
         // For rename-only mode, output directory must be specified
         if (!options.outputDir) {
-            console.error('\n❌ Error: --output directory must be specified when using --rename-only\n');
+            logger.error('\n❌ Error: --output directory must be specified when using --rename-only\n');
             return;
         }
         
         if (!fs.existsSync(options.outputDir)) {
-            console.error(`\n❌ Error: Output directory "${options.outputDir}" does not exist\n`);
+            logger.error(`\n❌ Error: Output directory "${options.outputDir}" does not exist\n`);
             return;
         }
         
@@ -1889,7 +1889,7 @@ async function renameExistingFiles() {
         
         closeLog();
     } catch (error) {
-        console.error(`\n❌ Error during renaming: ${error}\n`);
+        logger.error(`\n❌ Error during renaming: ${error}\n`);
         if (logStream) {
             log(`Fatal error: ${error}`);
             closeLog();
@@ -3000,7 +3000,7 @@ async function ripAllTracks() {
             console.log('');
         }
     } catch (error) {
-        console.error(`\n❌ Error during ripping: ${error}\n`);
+        logger.error(`\n❌ Error during ripping: ${error}\n`);
         log(`Fatal error: ${error}`);
     } finally {
         closeLog();
