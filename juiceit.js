@@ -869,6 +869,8 @@ args.forEach((arg, index) => {
         options.showHelp = true;
     } else if (arg === '--help-dev') {
         options.showHelpDev = true;
+    } else if (arg === '--version' || arg === '-v') {
+        options.showVersion = true;
     } else if (arg === '--output' && args[index + 1]) {
         options.outputDir = args[index + 1]; // Set outputDir from argument
     } else if (arg === '--dvdSource' && args[index + 1]) {
@@ -1239,6 +1241,13 @@ if (options.showHelp) {
 // Show developer help if requested
 if (options.showHelpDev) {
     showDeveloperHelp();
+    process.exit(0);
+}
+
+// Show version if requested
+if (options.showVersion) {
+    const pkg = require('./package.json');
+    console.log(`juiceit v${pkg.version}`);
     process.exit(0);
 }
 
@@ -3281,6 +3290,7 @@ Options:
   --dry-run         Create stub files instead of actual ripping
                     Useful for testing the workflow without waiting for encoding
   --help-dev        Show developer commands (make, npm, testing)
+  --version, -v     Show version number
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
