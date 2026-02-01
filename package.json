@@ -19,7 +19,7 @@
     "create-tarball": "bash ./bin/create_tarball.sh $npm_package_version",
     "standard-version": "standard-version",
     "release": "npm run standard-version && bash ./bin/release.sh",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "lint-staged": {
     "*.js": [
