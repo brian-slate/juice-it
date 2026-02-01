@@ -12,7 +12,9 @@ const testFiles = [
     'juiceit.test.js',
     'prompts.test.js',
     'runtime-analysis.test.js',
-    'openai-api.test.js'
+    'openai-api.test.js',
+    'naming.test.js',
+    'e2e-dry-run.test.js'
 ];
 
 console.log('');

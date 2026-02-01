@@ -45,6 +45,9 @@ const aiConfig = require('./config/ai-config');
 // Logger
 const { getLogger } = require('./lib/logger');
 
+// Plex-compatible naming utilities
+const { sanitizeForPlex, calculateProposedName, buildBaseFileName, buildExtrasFileName } = require('./lib/naming');
+
 // ==================== LOGGING ====================
 
 // Global logger instance - initialized after options are parsed
@@ -898,6 +901,8 @@ args.forEach((arg, index) => {
         options.noLookup = true; // Implied: skip metadata lookup
     } else if (arg === '--include-extras') {
         options.includeExtras = true; // Rip all tracks including those marked as skip
+    } else if (arg === '--dry-run') {
+        options.dryRun = true; // Create stub files instead of actual ripping
     }
 });
 
@@ -1305,6 +1310,44 @@ if (options.runSetup) {
 function ripDvd(titleNumber, outputFileName, trackNum, totalTracks, onProgress) {
     return new Promise((resolve, reject) => {
         const outputFilePath = path.join(options.outputDir, `${outputFileName}.mp4`); // Use options.outputDir
+
+        // Dry-run mode: create stub file instead of actual ripping
+        if (options.dryRun) {
+            log(`[DRY-RUN] Would rip track ${titleNumber} to: ${outputFileName}.mp4`);
+
+            // Simulate progress updates
+            const totalSteps = 10;
+            const stepDelay = 100; // 100ms per step (total ~1s simulation)
+            let step = 0;
+
+            const progressInterval = setInterval(() => {
+                step++;
+                const progress = (step / totalSteps) * 100;
+                const elapsed = step * (stepDelay / 1000);
+                const remaining = ((totalSteps - step) * stepDelay) / 1000;
+                onProgress(progress, elapsed, remaining, trackNum, totalTracks);
+
+                if (step >= totalSteps) {
+                    clearInterval(progressInterval);
+
+                    // Create stub file with metadata comment
+                    const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : 0;
+                    const stubContent = `[DRY-RUN STUB FILE]
+Track: ${titleNumber}
+Filename: ${outputFileName}.mp4
+Duration: ${trackDuration} minutes
+Created: ${new Date().toISOString()}
+Command would be: HandBrakeCLI -i ${options.dvdSource} -t ${titleNumber} -o ${outputFilePath}
+`;
+                    fs.writeFileSync(outputFilePath, stubContent);
+                    log(`[DRY-RUN] Created stub file: ${outputFilePath}`);
+                    resolve();
+                }
+            }, stepDelay);
+
+            return;
+        }
+
         // Updated arguments for HandBrakeCLI with conditional deinterlacing, subtitles, and additional options
         const args = [
             '-i', options.dvdSource,
@@ -2359,43 +2402,6 @@ function loadPlan() {
     }
 }
 
-// Helper to sanitize filename (Plex-friendly: allows spaces, dashes, parentheses)
-function sanitizeForPlex(str) {
-    // Remove characters that are problematic for filesystems
-    // Keep spaces, letters, numbers, dashes, parentheses, and common punctuation
-    return str
-        .replace(/[<>:"/\\|?*]/g, '') // Remove filesystem-unsafe characters
-        .replace(/\s+/g, ' ')          // Normalize multiple spaces
-        .trim();
-}
-
-// Helper to calculate proposed name (Plex-compatible format)
-// Movies: "Movie Name (Year).mp4"
-// TV Shows: "Show Name (Year) - s01e01 - Episode Title.mp4"
-function calculateProposedName(index, metadata, baseFileName, numTitles) {
-    const titleNumber = index + 1;
-
-    if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[index]) {
-        const episode = metadata.episodes[index];
-        const seasonNum = String(metadata.season).padStart(2, '0');
-        const episodeNum = String(episode.episode_number).padStart(2, '0');
-        const episodeTitle = episode.name ? ` - ${sanitizeForPlex(episode.name)}` : '';
-        // Plex format: "Show Name (Year) - s01e01 - Episode Title.mp4"
-        return `${baseFileName} - s${seasonNum}e${episodeNum}${episodeTitle}.mp4`;
-    } else if (metadata.type === 'tv') {
-        const seasonNum = String(metadata.season).padStart(2, '0');
-        const episodeNum = String(titleNumber).padStart(2, '0');
-        // Plex format without episode title
-        return `${baseFileName} - s${seasonNum}e${episodeNum}.mp4`;
-    } else if (numTitles === 1) {
-        // Movie: just the base filename (already includes year in parentheses)
-        return `${baseFileName}.mp4`;
-    } else {
-        // Movie with multiple tracks (extras, etc.)
-        return `${baseFileName} - Part ${titleNumber}.mp4`;
-    }
-}
-
 async function ripAllTracks() {
     let logFilePath = null;
     let successCount = 0;
@@ -2848,7 +2854,11 @@ async function ripAllTracks() {
         
         console.log('');
         console.log('━'.repeat(60));
-        console.log('  🎬 Starting rip...');
+        if (options.dryRun) {
+            console.log('  🧪 DRY-RUN MODE - Creating stub files (no actual ripping)');
+        } else {
+            console.log('  🎬 Starting rip...');
+        }
         console.log('━'.repeat(60));
         console.log('');
 
@@ -3501,6 +3511,8 @@ Options:
                     Rips all tracks with simple names (discname_1.mp4, etc.)
   --include-extras  Also rip tracks that AI marked as menus/extras/unknown
                     Useful for getting bonus content, secret tracks, etc.
+  --dry-run         Create stub files instead of actual ripping
+                    Useful for testing the workflow without waiting for encoding
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5

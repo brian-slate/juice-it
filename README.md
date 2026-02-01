@@ -153,6 +153,7 @@ Options:
   --interactive, -i   Enable interactive mode (manual review/selection)
   --raw               Raw rip - skip metadata/AI, simple track names
   --include-extras    Also rip tracks marked as menus/extras by AI
+  --dry-run           Create stub files instead of actual ripping (for testing)
 ```
 
 ### Examples
