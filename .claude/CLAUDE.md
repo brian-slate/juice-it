@@ -90,6 +90,21 @@ juice-it/
 - **Package manager**: npm
 - **Distribution**: Homebrew tap (brian-slate/juiceit)
 
+### TV vs Movie Handling
+
+The codebase handles TV shows and movies differently:
+
+- **Detection**: `guessMediaType(numTitles)` - if disc has ≥3 titles, it's likely TV; otherwise movie
+- **TV Shows**: Get AI-powered episode mapping (track→episode), season metadata from TMDB
+- **Movies**: Simpler naming (just movie name + year), usually 1-2 tracks
+- **Extras**: Both types can have extras - use `--include-extras` to rip them
+
+### Key Flags
+
+- `--interactive` / `-i`: Manual review and selection mode
+- `--raw`: Skip all metadata/AI, rip tracks with simple names
+- `--include-extras`: Also rip tracks AI marked as menus/extras
+
 ---
 
 ## Testing

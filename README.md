@@ -149,6 +149,9 @@ Options:
   --scan-only         Scan disc and show metadata without ripping
   --rename-only       Rename existing files using metadata
   --verbose           Show detailed HandBrakeCLI output
+  --interactive, -i   Enable interactive mode (manual review/selection)
+  --raw               Raw rip - skip metadata/AI, simple track names
+  --include-extras    Also rip tracks marked as menus/extras by AI
 ```
 
 ### Examples
@@ -166,6 +169,16 @@ juiceit --no-lookup
 **Rename previously ripped files:**
 ```bash
 juiceit --rename-only --output ./my_ripped_dvd/
+```
+
+**Also rip extras, menus, and bonus content:**
+```bash
+juiceit --include-extras
+```
+
+**Raw rip without metadata (all tracks with simple names):**
+```bash
+juiceit --raw
 ```
 
 ## Creating a Release

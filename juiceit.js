@@ -49,7 +49,8 @@ const { getLogger } = require('./lib/logger');
 
 // Global logger instance - initialized after options are parsed
 let logger = null;
-const skippedTracks = [];
+const skippedTracks = []; // Tracks that failed during ripping
+const mappingSkippedTracks = []; // Tracks skipped due to AI mapping (menus, extras, etc.)
 
 // Legacy functions that wrap the new logger (for gradual migration)
 function initializeLog(outputDir, volumeName) {
@@ -889,6 +890,8 @@ args.forEach((arg, index) => {
     } else if (arg === '--raw') {
         options.rawMode = true; // Raw rip mode - skip all metadata/AI, just rip tracks
         options.noLookup = true; // Implied: skip metadata lookup
+    } else if (arg === '--include-extras') {
+        options.includeExtras = true; // Rip all tracks including those marked as skip
     }
 });
 
@@ -2831,12 +2834,33 @@ async function ripAllTracks() {
         }
         log('=== END FINAL MAPPINGS ===');
 
-        // Rip only the tracks that weren't marked as skip
+        // Handle --include-extras: override skip status for extras
+        if (options.includeExtras) {
+            console.log('  ℹ️  --include-extras: Will also rip skipped tracks (menus, extras, etc.)');
+            console.log('');
+            for (const mapping of mappingsToRip) {
+                if (mapping.status === 'skip') {
+                    // Generate an extras filename for this track
+                    const extraName = `${baseFileName}_extra_track${mapping.trackNum}.mp4`;
+                    mapping.status = extraName;
+                    mapping.wasSkipped = true; // Track that this was originally skipped
+                    log(`--include-extras: Track ${mapping.trackNum} (was skip) → ${extraName}`);
+                }
+            }
+        }
+
+        // Rip tracks (skip those marked as skip unless --include-extras is used)
         for (const mapping of mappingsToRip) {
             if (mapping.status === 'skip') {
+                // Track this as a mapping-skipped track
+                mappingSkippedTracks.push({
+                    track: mapping.trackNum,
+                    duration: mapping.duration,
+                    reason: mapping.aiReasoning || 'AI marked as menu/extra'
+                });
                 continue;
             }
-            
+
             const titleNumber = mapping.trackNum;
             const finalFileName = mapping.status; // status contains the final filename
             
@@ -2890,7 +2914,7 @@ async function ripAllTracks() {
             console.log(`  ⚡ Ripping complete: ${successCount} of ${totalToRip} tracks successful`);
             if (skippedTracks.length > 0) {
                 console.log('');
-                console.log(`  ℹ️  Skipped ${skippedTracks.length} track(s):`);
+                console.log(`  ❌ ${skippedTracks.length} track(s) failed during ripping:`);
                 skippedTracks.forEach(({ track, reason }) => {
                     console.log(`     • Track ${track}: ${reason}`);
                 });
@@ -2900,22 +2924,47 @@ async function ripAllTracks() {
         }
         console.log('━'.repeat(60));
         console.log('');
-        
+
         log('Ripping completed');
         log(`Successfully ripped: ${successCount}/${totalToRip} tracks`);
         if (skippedTracks.length > 0) {
             log(`Failed tracks: ${JSON.stringify(skippedTracks)}`);
         }
-        
+        if (mappingSkippedTracks.length > 0) {
+            log(`Mapping-skipped tracks: ${JSON.stringify(mappingSkippedTracks)}`);
+        }
+
         console.log('');
         if (logFilePath) {
             const relativeLogPath = path.relative(process.cwd(), logFilePath);
             console.log(`  📄 Log: ${relativeLogPath}`);
         }
         console.log('');
-        
+
         if (skippedTracks.length > 0) {
             console.log('  💡 Check the log file for detailed error information');
+            console.log('');
+        }
+
+        // Show summary of tracks skipped due to mapping (menus, extras, etc.)
+        if (mappingSkippedTracks.length > 0 && !options.includeExtras) {
+            console.log('━'.repeat(60));
+            console.log('  📋 Tracks Not Ripped (Extras/Menus)');
+            console.log('━'.repeat(60));
+            console.log('');
+            console.log(`  ${mappingSkippedTracks.length} track(s) were skipped based on AI analysis:`);
+            console.log('');
+            mappingSkippedTracks.forEach(({ track, duration, reason }) => {
+                const shortReason = reason && reason.length > 50 ? reason.substring(0, 47) + '...' : reason;
+                console.log(`    • Track ${track} (${duration} min): ${shortReason || 'menu/extra'}`);
+            });
+            console.log('');
+            console.log('  💡 To also rip these tracks (extras, menus, bonus content):');
+            console.log('');
+            console.log('     juiceit --include-extras');
+            console.log('');
+            console.log('     Or for a raw rip of everything:');
+            console.log('     juiceit --raw');
             console.log('');
         }
 
@@ -3424,6 +3473,8 @@ Options:
                     (default: fully automatic with AI-powered decisions)
   --raw             Raw rip mode - skip metadata lookup and AI mapping
                     Rips all tracks with simple names (discname_1.mp4, etc.)
+  --include-extras  Also rip tracks that AI marked as menus/extras/unknown
+                    Useful for getting bonus content, secret tracks, etc.
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
