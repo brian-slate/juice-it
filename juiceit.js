@@ -636,10 +636,12 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                 if (aiSelection.selectedType === 'tv') {
                     const season = aiSelection.season || 1;
                     const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
+                    const showYear = selectedResult.first_air_date ? selectedResult.first_air_date.split('-')[0] : null;
                     console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}${confidenceStr}`);
                     return {
                         type: 'tv',
                         name: selectedResult.name,
+                        year: showYear,
                         season: season,
                         episodes: seasonDetails ? seasonDetails.episodes : null,
                         aiSelected: true
@@ -664,10 +666,12 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
         if (mediaType === 'tv' && tvResults.length > 0) {
             const show = tvResults[0];
             const seasonDetails = await getTVSeasonDetails(show.id, 1);
+            const showYear = show.first_air_date ? show.first_air_date.split('-')[0] : null;
             console.log(`\n   📺 Auto-selected: ${show.name} - Season 1`);
             return {
                 type: 'tv',
                 name: show.name,
+                year: showYear,
                 season: 1,
                 episodes: seasonDetails ? seasonDetails.episodes : null
             };
@@ -774,13 +778,15 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
             });
             const season = parseInt(await seasonPrompt.run());
             log(`User selected season: ${season}`);
-            
+
             // Fetch episode details
             const seasonDetails = await getTVSeasonDetails(selected.data.id, season);
-            
+            const showYear = selected.data.first_air_date ? selected.data.first_air_date.split('-')[0] : null;
+
             return {
                 type: 'tv',
                 name: selected.data.name,
+                year: showYear,
                 season: season,
                 episodes: seasonDetails ? seasonDetails.episodes : null
             };
@@ -1757,18 +1763,19 @@ async function renameExistingFiles() {
         
         const logFilePath = initializeLog(options.outputDir, volumeName);
         log(`Rename mode - Metadata: ${JSON.stringify(metadata)}`);
-        
-        // Determine base file name based on metadata
+
+        // Determine base file name based on metadata (Plex-compatible format)
         let baseFileName = volumeName;
         if (metadata.type === 'tv') {
-            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const yearStr = metadata.year ? ` (${metadata.year})` : '';
+            baseFileName = sanitizeForPlex(`${metadata.name}${yearStr}`);
         } else if (metadata.type === 'movie') {
-            const year = metadata.year ? `_${metadata.year}` : '';
-            baseFileName = `${metadata.name}${year}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const yearStr = metadata.year ? ` (${metadata.year})` : '';
+            baseFileName = sanitizeForPlex(`${metadata.name}${yearStr}`);
         } else if (metadata.type === 'custom') {
-            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            baseFileName = sanitizeForPlex(metadata.name);
         }
-        
+
         let renameCount = 0;
         
         for (let i = 0; i < existingFiles.length; i++) {
@@ -1776,21 +1783,21 @@ async function renameExistingFiles() {
             const titleNumber = i + 1;
             let newFileName;
             
-            // Generate filename based on metadata type
+            // Generate filename based on metadata type (Plex-compatible format)
             if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[i]) {
                 const episode = metadata.episodes[i];
                 const seasonNum = String(metadata.season).padStart(2, '0');
                 const episodeNum = String(episode.episode_number).padStart(2, '0');
-                const episodeName = episode.name ? `_${episode.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-                newFileName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
+                const episodeTitle = episode.name ? ` - ${sanitizeForPlex(episode.name)}` : '';
+                newFileName = `${baseFileName} - s${seasonNum}e${episodeNum}${episodeTitle}.mp4`;
             } else if (metadata.type === 'tv') {
                 const seasonNum = String(metadata.season).padStart(2, '0');
                 const episodeNum = String(titleNumber).padStart(2, '0');
-                newFileName = `${baseFileName}_S${seasonNum}E${episodeNum}.mp4`;
+                newFileName = `${baseFileName} - s${seasonNum}e${episodeNum}.mp4`;
             } else if (numTitles === 1) {
                 newFileName = `${baseFileName}.mp4`;
             } else {
-                newFileName = `${baseFileName}_${titleNumber}.mp4`;
+                newFileName = `${baseFileName} - Part ${titleNumber}.mp4`;
             }
             
             const oldPath = path.join(options.outputDir, oldFile);
@@ -2352,24 +2359,40 @@ function loadPlan() {
     }
 }
 
-// Helper to calculate proposed name
+// Helper to sanitize filename (Plex-friendly: allows spaces, dashes, parentheses)
+function sanitizeForPlex(str) {
+    // Remove characters that are problematic for filesystems
+    // Keep spaces, letters, numbers, dashes, parentheses, and common punctuation
+    return str
+        .replace(/[<>:"/\\|?*]/g, '') // Remove filesystem-unsafe characters
+        .replace(/\s+/g, ' ')          // Normalize multiple spaces
+        .trim();
+}
+
+// Helper to calculate proposed name (Plex-compatible format)
+// Movies: "Movie Name (Year).mp4"
+// TV Shows: "Show Name (Year) - s01e01 - Episode Title.mp4"
 function calculateProposedName(index, metadata, baseFileName, numTitles) {
     const titleNumber = index + 1;
-    
+
     if (metadata.type === 'tv' && metadata.episodes && metadata.episodes[index]) {
         const episode = metadata.episodes[index];
         const seasonNum = String(metadata.season).padStart(2, '0');
         const episodeNum = String(episode.episode_number).padStart(2, '0');
-        const episodeName = episode.name ? `_${episode.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-        return `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
+        const episodeTitle = episode.name ? ` - ${sanitizeForPlex(episode.name)}` : '';
+        // Plex format: "Show Name (Year) - s01e01 - Episode Title.mp4"
+        return `${baseFileName} - s${seasonNum}e${episodeNum}${episodeTitle}.mp4`;
     } else if (metadata.type === 'tv') {
         const seasonNum = String(metadata.season).padStart(2, '0');
         const episodeNum = String(titleNumber).padStart(2, '0');
-        return `${baseFileName}_S${seasonNum}E${episodeNum}.mp4`;
+        // Plex format without episode title
+        return `${baseFileName} - s${seasonNum}e${episodeNum}.mp4`;
     } else if (numTitles === 1) {
+        // Movie: just the base filename (already includes year in parentheses)
         return `${baseFileName}.mp4`;
     } else {
-        return `${baseFileName}_${titleNumber}.mp4`;
+        // Movie with multiple tracks (extras, etc.)
+        return `${baseFileName} - Part ${titleNumber}.mp4`;
     }
 }
 
@@ -2469,16 +2492,19 @@ async function ripAllTracks() {
         }
         
         log(`Metadata: ${JSON.stringify(metadata)}`);
-        
-        // Determine base file name based on metadata
+
+        // Determine base file name based on metadata (Plex-compatible format)
+        // Movies: "Movie Name (Year)"
+        // TV Shows: "Show Name (Year)"
         let baseFileName = volumeName;
         if (metadata.type === 'tv') {
-            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const yearStr = metadata.year ? ` (${metadata.year})` : '';
+            baseFileName = sanitizeForPlex(`${metadata.name}${yearStr}`);
         } else if (metadata.type === 'movie') {
-            const year = metadata.year ? `_${metadata.year}` : '';
-            baseFileName = `${metadata.name}${year}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const yearStr = metadata.year ? ` (${metadata.year})` : '';
+            baseFileName = sanitizeForPlex(`${metadata.name}${yearStr}`);
         } else if (metadata.type === 'custom') {
-            baseFileName = metadata.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            baseFileName = sanitizeForPlex(metadata.name);
         }
 
         // Check for existing plan
@@ -2840,8 +2866,8 @@ async function ripAllTracks() {
             console.log('');
             for (const mapping of mappingsToRip) {
                 if (mapping.status === 'skip') {
-                    // Generate an extras filename for this track
-                    const extraName = `${baseFileName}_extra_track${mapping.trackNum}.mp4`;
+                    // Generate an extras filename for this track (Plex-compatible)
+                    const extraName = `${baseFileName} - Extra Track ${mapping.trackNum}.mp4`;
                     mapping.status = extraName;
                     mapping.wasSkipped = true; // Track that this was originally skipped
                     log(`--include-extras: Track ${mapping.trackNum} (was skip) → ${extraName}`);

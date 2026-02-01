@@ -6,6 +6,7 @@ A smart DVD ripper with automatic metadata lookup and episode naming. Rip entire
 
 - 🔍 **Auto DVD Detection** - Automatically detects inserted DVDs
 - 📺 **Smart Metadata Lookup** - Fetches TV show and movie info from TMDB
+- 📁 **Plex-Ready Naming** - Files named in Plex-compatible format automatically
 - 🤖 **AI-Powered Mapping** (Optional) - Uses OpenAI to intelligently map tracks to episodes
   - Automatic TMDB match selection
   - Handles complex disc layouts (non-sequential episodes, menus, extras)
@@ -179,6 +180,27 @@ juiceit --include-extras
 **Raw rip without metadata (all tracks with simple names):**
 ```bash
 juiceit --raw
+```
+
+## Output File Naming
+
+JuiceIt uses [Plex-compatible naming conventions](https://support.plex.tv/articles/naming-and-organizing-your-movie-media-files/) so your ripped files are immediately recognized by Plex.
+
+**Movies:**
+```
+Movie Name (2024).mp4
+Movie Name (2024) - Part 2.mp4     # For multi-part movies
+```
+
+**TV Shows:**
+```
+Show Name (2020) - s01e01 - Episode Title.mp4
+Show Name (2020) - s01e02 - Another Episode.mp4
+```
+
+**Extras (with --include-extras):**
+```
+Movie Name (2024) - Extra Track 1.mp4
 ```
 
 ## Creating a Release

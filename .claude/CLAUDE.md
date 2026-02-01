@@ -96,8 +96,20 @@ The codebase handles TV shows and movies differently:
 
 - **Detection**: `guessMediaType(numTitles)` - if disc has ≥3 titles, it's likely TV; otherwise movie
 - **TV Shows**: Get AI-powered episode mapping (track→episode), season metadata from TMDB
-- **Movies**: Simpler naming (just movie name + year), usually 1-2 tracks
+- **Movies**: Get title and year from TMDB, single main file
 - **Extras**: Both types can have extras - use `--include-extras` to rip them
+
+### Plex-Compatible File Naming
+
+All files are named in Plex-compatible format (see [Plex Support](https://support.plex.tv/articles/naming-and-organizing-your-movie-media-files/)):
+
+- **Movies**: `Movie Name (Year).mp4`
+- **TV Shows**: `Show Name (Year) - s01e01 - Episode Title.mp4`
+- **Extras**: `Movie Name (Year) - Extra Track 1.mp4`
+
+Key functions:
+- `sanitizeForPlex(str)` - Removes filesystem-unsafe chars, keeps spaces/dashes/parentheses
+- `calculateProposedName()` - Generates Plex-format filename from metadata
 
 ### Key Flags
 
