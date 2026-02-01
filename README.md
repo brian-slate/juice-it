@@ -24,9 +24,11 @@ A smart DVD ripper with automatic metadata lookup and episode naming. Rip entire
 ### Via Homebrew (Recommended)
 
 ```bash
-brew tap brian-slate/juiceit
-brew install juiceit
+brew tap brian-slate/juice-it
+brew install juice-it
 ```
+
+Both `juiceit` and `juice-it` commands will be available.
 
 ### Manual Installation
 
@@ -95,27 +97,6 @@ After installation, configure your API keys:
 > **AI features are optional** - JuiceIt works great without OpenAI, you'll just need
 > to manually select TMDB matches and review track mappings.
 
-## Installation (Old)
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/juice-it.git
-   cd juice-it
-   ```
-
-2. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-3. (Optional) Install globally for easier access:
-
-   ```bash
-   npm install -g .
-   ```
-
 ## Usage
 
 ### Basic Usage (Auto-detection)
@@ -141,6 +122,7 @@ juiceit [options]
 
 Options:
   --help              Show help message
+  --version, -v       Show version number
   --setup             Configure TMDB API key
   --output DIR        Output directory (default: <disc_name>_<date>)
   --dvdSource PATH    DVD device path (auto-detected if omitted)
@@ -206,27 +188,18 @@ Movie Name (2024) - Extra Track 1.mp4
 
 ## Creating a Release
 
-To create a new release of the tool, follow these steps:
+```bash
+make release        # Patch release (1.3.4 → 1.3.5)
+make release-minor  # Minor release (1.3.4 → 1.4.0)
+make release-major  # Major release (1.3.4 → 2.0.0)
+```
 
-1. **Bump the Version and Create a Tarball**:
-   Run the following command to bump the version, create a changelog, tag the release, and create a tarball:
-
-   ```bash
-   npm run release
-   ```
-
-   This command will:
-   - Update the version in `package.json`.
-   - Generate a `CHANGELOG.md` file.
-   - Create a Git tag for the release.
-   - Create a tarball named `juice-it-vX.Y.Z.tar.gz` (where `X.Y.Z` is the new version).
-
-2. **Push Changes to GitHub**:
-   After running the release command, push the changes and tags to your GitHub repository:
-
-   ```bash
-   git push --follow-tags
-   ```
+This single command:
+- Runs all tests and lint
+- Bumps version in package.json
+- Commits, tags, and pushes to GitHub
+- Updates Homebrew tap with new SHA256
+- Pushes tap changes
 
 ## Legal Disclaimer
 
@@ -258,18 +231,17 @@ Contributing to JuiceIt? See [CONTRIBUTING.md](CONTRIBUTING.md) for full guideli
 ### Quick Start
 
 ```bash
-# 1. Make your changes
+# 1. Link local code for instant testing
+make reinstall
+
+# 2. Make your changes
 vim juiceit.js
 
-# 2. Run tests
-npm test
-
-# 3. Commit and update Homebrew
-git add -A && git commit -m "Your message"
-./bin/update-homebrew.sh
-
-# 4. Test
+# 3. Test immediately (no rebuild needed!)
 juiceit --help
+
+# 4. Run tests before committing
+npm test
 ```
 
 ### Logging Guidelines
@@ -311,10 +283,8 @@ juiceit --diagnose    # Detailed diagnostic output
 ### Documentation
 
 - `CONTRIBUTING.md` - Development guidelines and logging/UI architecture
-- `NPM_COMMANDS.md` - All npm scripts and testing commands
-- `RELEASE.md` - How to create a new release
-- `PUBLISH_TAP.md` - Publishing your tap to GitHub
 - `.claude/CLAUDE.md` - AI assistant instructions
+- `juiceit --help-dev` - Developer commands (make targets, npm scripts)
 
 ## Contributing
 
