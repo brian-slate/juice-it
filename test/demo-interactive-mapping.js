@@ -42,7 +42,7 @@ function sprintf(format, ...args) {
 }
 
 // Create mock MP4 files
-function createMockMP4(outputPath, sizeInMB, durationInSeconds) {
+function createMockMP4(outputPath, sizeInMB, _durationInSeconds) {
     const sizeInBytes = sizeInMB * 1024 * 1024;
     const buffer = Buffer.alloc(sizeInBytes, 0);
     

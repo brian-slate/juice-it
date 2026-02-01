@@ -30,9 +30,8 @@ const { execSync, spawn, spawnSync } = require('child_process'); // Ensure spawn
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { Select, Input, AutoComplete } = require('enquirer');
+const { Select, Input } = require('enquirer');
 const OpenAI = require('openai');
-const { z } = require('zod');
 const { zodResponseFormat } = require('openai/helpers/zod');
 
 // Prompt templates and schemas
@@ -46,7 +45,7 @@ const aiConfig = require('./config/ai-config');
 const { getLogger } = require('./lib/logger');
 
 // Plex-compatible naming utilities
-const { sanitizeForPlex, calculateProposedName, buildBaseFileName, buildExtrasFileName } = require('./lib/naming');
+const { sanitizeForPlex, calculateProposedName } = require('./lib/naming');
 
 // ==================== LOGGING ====================
 
@@ -488,7 +487,7 @@ async function runSetup() {
     
     const tmdbPrompt = new Input({
         message: 'Enter your TMDB API key (or press Enter to use demo key):',
-        validate(value) {
+        validate(_value) {
             return true; // Allow blank for demo key
         }
     });
@@ -547,7 +546,7 @@ async function runSetup() {
         if (openAiChoice === 'Yes') {
             const openAiPrompt = new Input({
                 message: 'Enter your OpenAI API key (or press Enter to skip):',
-                validate(value) {
+                validate(_value) {
                     return true; // Allow blank to skip
                 }
             });
@@ -752,7 +751,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                 value: c.value,
                 hint: c.hint
             })),
-            result(name) {
+            result(_name) {
                 return this.focused.value;
             }
         });
@@ -868,6 +867,8 @@ const options = {
 args.forEach((arg, index) => {
     if (arg === '--help') {
         options.showHelp = true;
+    } else if (arg === '--help-dev') {
+        options.showHelpDev = true;
     } else if (arg === '--output' && args[index + 1]) {
         options.outputDir = args[index + 1]; // Set outputDir from argument
     } else if (arg === '--dvdSource' && args[index + 1]) {
@@ -1235,6 +1236,12 @@ if (options.showHelp) {
     process.exit(0);
 }
 
+// Show developer help if requested
+if (options.showHelpDev) {
+    showDeveloperHelp();
+    process.exit(0);
+}
+
 // Run setup if requested
 if (options.runSetup) {
     (async () => {
@@ -1544,7 +1551,7 @@ async function getNumberOfTitles() {
         });
     });
 
-    const { code, output, titleDurations, totalTitles } = scanResult;
+    const { code, output, titleDurations } = scanResult;
 
     if (code === 0 || output.includes('scan: DVD has')) {
         const match = output.match(/scan: DVD has (\d+) title/);
@@ -1598,21 +1605,6 @@ async function getNumberOfTitles() {
 
 // Clear cache if the volume name changes (will be checked in getNumberOfTitles)
 
-// Helper function to categorize track by duration
-function categorizeTrack(duration) {
-    if (duration < 2) {
-        return 'menu';
-    } else if (duration < 10) {
-        return 'extra';
-    } else if (duration >= 20 && duration <= 45) {
-        return 'episode';
-    } else if (duration > 90) {
-        return 'full_disc';
-    } else {
-        return 'unknown';
-    }
-}
-
 // Helper function to get video duration in minutes
 function getVideoDuration(filePath) {
     try {
@@ -1630,29 +1622,6 @@ function getVideoDuration(filePath) {
         logger.debug(`Error getting duration for ${filePath}: ${error.message}`);
     }
     return null;
-}
-
-// Helper function for sprintf-style formatting
-function sprintf(format, ...args) {
-    let i = 0;
-    return format.replace(/%0?(\d*)d/g, (match, width) => {
-        const num = args[i++];
-        return width ? String(num).padStart(parseInt(width), '0') : String(num);
-    });
-}
-
-// Helper function to format file size
-function formatFileSize(bytes) {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-// Helper function to determine if track should show warning
-function shouldWarn(fileSize, duration) {
-    const MB = 1024 * 1024;
-    return fileSize < 50 * MB || duration < 5;
 }
 
 async function renameExistingFiles() {
@@ -1708,7 +1677,7 @@ async function renameExistingFiles() {
         console.log(`📂 Analyzing ${allFiles.length} file(s)...\n`);
         
         // Get duration for each file
-        const filesWithDuration = allFiles.map((f, index) => {
+        const filesWithDuration = allFiles.map((f, _index) => {
             const filePath = path.join(options.outputDir, f);
             const duration = getVideoDuration(filePath);
             const stats = fs.statSync(filePath);
@@ -1885,10 +1854,7 @@ async function renameExistingFiles() {
         closeLog();
     } catch (error) {
         logger.error(`\n❌ Error during renaming: ${error}\n`);
-        if (logStream) {
-            log(`Fatal error: ${error}`);
-            closeLog();
-        }
+        closeLog();
     }
 }
 
@@ -2081,7 +2047,7 @@ async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileNam
         // Build episode choices
         const episodeChoices = [];
         if (metadata.type === 'tv' && metadata.episodes) {
-            metadata.episodes.forEach((ep, idx) => {
+            metadata.episodes.forEach((ep, _idx) => {
                 const seasonNum = String(metadata.season).padStart(2, '0');
                 const episodeNum = String(ep.episode_number).padStart(2, '0');
                 const episodeName = ep.name ? `_${ep.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
@@ -2121,144 +2087,6 @@ async function editTrackMappingBeforeRip(proposedMappings, metadata, baseFileNam
     }
 }
 
-// Interactive review and mapping function (AFTER ripping - for backwards compatibility)
-async function reviewAndMapEpisodes(proposedMappings, metadata, volumeName, baseFileName, outputDir) {
-    console.log('\n' + '━'.repeat(60));
-    console.log('  📋 Review Track Mappings');
-    console.log('━'.repeat(60));
-    console.log('');
-    
-    // Display track table
-    console.log('  Track  Size       Duration  Status  Proposed Name');
-    console.log('  -----  ---------  --------  ------  ' + '-'.repeat(40));
-    
-    for (const mapping of proposedMappings) {
-        const trackStr = String(mapping.trackNum).padStart(2);
-        const sizeStr = formatFileSize(mapping.fileSize).padEnd(9);
-        const durationStr = `${mapping.duration} min`.padEnd(8);
-        const statusIcon = mapping.status === 'skip' ? '⏭' : (shouldWarn(mapping.fileSize, mapping.duration) ? '⚠️' : '✓');
-        const proposedName = mapping.proposedName || mapping.filename;
-        console.log(`  ${trackStr}     ${sizeStr}  ${durationStr}  ${statusIcon}     ${proposedName}`);
-    }
-    
-    console.log('');
-    
-    // Main menu loop
-    while (true) {
-        const mainMenu = new Select({
-            message: 'What would you like to do?',
-            choices: [
-                'Edit Track Mapping',
-                'Re-search TMDB and Re-auto-map',
-                'Accept All and Finalize',
-                'Cancel (keep generic track names)'
-            ]
-        });
-        
-        try {
-            const choice = await mainMenu.run();
-            
-            if (choice === 'Edit Track Mapping') {
-                await editTrackMapping(proposedMappings, metadata, baseFileName);
-            } else if (choice === 'Re-search TMDB and Re-auto-map') {
-                const newMetadata = await reAutoMap(volumeName, proposedMappings.length);
-                if (newMetadata) {
-                    metadata = newMetadata;
-                    // Re-calculate proposed names
-                    for (let i = 0; i < proposedMappings.length; i++) {
-                        proposedMappings[i].proposedName = calculateProposedName(i, metadata, baseFileName, proposedMappings.length);
-                    }
-                }
-            } else if (choice === 'Accept All and Finalize') {
-                await finalizeRenames(proposedMappings, outputDir);
-                return true;
-            } else {
-                console.log('\n  ✓ Keeping generic track names\n');
-                return false;
-            }
-        } catch (err) {
-            console.log('\n  ✓ Operation cancelled\n');
-            return false;
-        }
-        
-        // Redisplay table after action
-        console.log('');
-        console.log('  Track  Size       Duration  Status  Proposed Name');
-        console.log('  -----  ---------  --------  ------  ' + '-'.repeat(40));
-        
-        for (const mapping of proposedMappings) {
-            const trackStr = String(mapping.trackNum).padStart(2);
-            const sizeStr = formatFileSize(mapping.fileSize).padEnd(9);
-            const durationStr = `${mapping.duration} min`.padEnd(8);
-            const statusIcon = mapping.status === 'skip' ? '⏭' : (shouldWarn(mapping.fileSize, mapping.duration) ? '⚠️' : '✓');
-            const proposedName = mapping.proposedName || mapping.filename;
-            console.log(`  ${trackStr}     ${sizeStr}  ${durationStr}  ${statusIcon}     ${proposedName}`);
-        }
-        console.log('');
-    }
-}
-
-// Edit individual track mapping
-async function editTrackMapping(proposedMappings, metadata, baseFileName) {
-    // Select track
-    const trackChoices = proposedMappings.map(m => {
-        const warn = shouldWarn(m.fileSize, m.duration) ? '⚠️ ' : '';
-        const skip = m.status === 'skip' ? '(SKIP) ' : '';
-        return {
-            name: `${warn}${skip}Track ${m.trackNum}: ${m.proposedName || m.filename} (${formatFileSize(m.fileSize)}, ${m.duration}min)`,
-            value: m.trackNum
-        };
-    });
-    
-    const trackSelector = new Select({
-        message: 'Select track to edit:',
-        choices: [...trackChoices, { name: '← Back', value: 'back' }]
-    });
-    
-    const selectedTrack = await trackSelector.run();
-    if (selectedTrack === 'back') return;
-    
-    const mapping = proposedMappings.find(m => m.trackNum === selectedTrack);
-    
-    // Build episode choices
-    const episodeChoices = [];
-    if (metadata.type === 'tv' && metadata.episodes) {
-        metadata.episodes.forEach((ep, idx) => {
-            const seasonNum = String(metadata.season).padStart(2, '0');
-            const episodeNum = String(ep.episode_number).padStart(2, '0');
-            const episodeName = ep.name ? `_${ep.name.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-            const proposedName = `${baseFileName}_S${seasonNum}E${episodeNum}${episodeName}.mp4`;
-            episodeChoices.push({
-                name: `S${seasonNum}E${episodeNum} - ${ep.name} (${ep.runtime}min)`,
-                value: proposedName
-            });
-        });
-    }
-    
-    episodeChoices.push({ name: 'Mark as Extra/Skip', value: 'SKIP' });
-    episodeChoices.push({ name: '← Back', value: 'back' });
-    
-    const assignmentMenu = new Select({
-        message: `Reassign Track ${selectedTrack} to:`,
-        choices: episodeChoices
-    });
-    
-    const assignment = await assignmentMenu.run();
-    if (assignment === 'back') return;
-    
-    if (assignment === 'SKIP') {
-        mapping.status = 'skip';
-        mapping.proposedName = '(will not rename)';
-        console.log(`\n  ✓ Track ${selectedTrack} marked to skip\n`);
-        log(`Track ${selectedTrack} marked to skip`);
-    } else {
-        mapping.status = 'rename';
-        mapping.proposedName = assignment;
-        console.log(`\n  ✓ Track ${selectedTrack} reassigned to: ${assignment}\n`);
-        log(`Track ${selectedTrack} reassigned to: ${assignment}`);
-    }
-}
-
 // Re-search TMDB and re-auto-map
 async function reAutoMap(volumeName, numTitles) {
     console.log('\n  🔍 Re-searching TMDB...\n');
@@ -2280,66 +2108,6 @@ async function reAutoMap(volumeName, numTitles) {
         console.log(`\n  ❌ Error during search: ${error.message}\n`);
         return null;
     }
-}
-
-// Finalize renames
-async function finalizeRenames(proposedMappings, outputDir) {
-    console.log('');
-    console.log('━'.repeat(60));
-    console.log('  🎬 Finalizing Renames');
-    console.log('━'.repeat(60));
-    console.log('');
-    
-    let renameCount = 0;
-    let skipCount = 0;
-    
-    for (const mapping of proposedMappings) {
-        if (mapping.status === 'skip') {
-            console.log(`  ⏭  Track ${mapping.trackNum}: Skipped`);
-            log(`Track ${mapping.trackNum} skipped (marked as extra)`);
-            skipCount++;
-            continue;
-        }
-        
-        const oldPath = path.join(outputDir, mapping.filename);
-        const newPath = path.join(outputDir, mapping.proposedName);
-        
-        if (mapping.filename === mapping.proposedName) {
-            console.log(`  ⏭  Track ${mapping.trackNum}: ${mapping.filename} (unchanged)`);
-            continue;
-        }
-        
-        if (fs.existsSync(newPath) && oldPath !== newPath) {
-            console.log(`  ⚠️  Track ${mapping.trackNum}: ${mapping.filename}`);
-            console.log(`      → ${mapping.proposedName} (target exists, skipping)`);
-            log(`Skipped rename ${mapping.filename} -> ${mapping.proposedName}: target exists`);
-            skipCount++;
-            continue;
-        }
-        
-        try {
-            fs.renameSync(oldPath, newPath);
-            console.log(`  ✓ Track ${mapping.trackNum}: ${mapping.filename}`);
-            console.log(`    → ${mapping.proposedName}`);
-            log(`Renamed: ${mapping.filename} -> ${mapping.proposedName}`);
-            renameCount++;
-        } catch (error) {
-            console.log(`  ❌ Track ${mapping.trackNum}: Failed to rename ${mapping.filename}`);
-            console.log(`      Error: ${error.message}`);
-            log(`Error renaming ${mapping.filename}: ${error.message}`);
-        }
-    }
-    
-    console.log('');
-    console.log('━'.repeat(60));
-    if (renameCount > 0) {
-        console.log(`  ⚡ Renamed ${renameCount} file(s) successfully!`);
-    }
-    if (skipCount > 0) {
-        console.log(`  ⏭  Skipped ${skipCount} file(s)`);
-    }
-    console.log('━'.repeat(60));
-    console.log('');
 }
 
 // Save rip plan to file
@@ -2794,7 +2562,6 @@ async function ripAllTracks() {
                 const uniqueMappedEpisodes = new Set(mappedEpisodes.map(m => m.episodeIndex)).size;
 
                 if (uniqueMappedEpisodes < expectedEpisodes) {
-                    const missingCount = expectedEpisodes - uniqueMappedEpisodes;
                     logger.warn(`Episode mismatch: ${uniqueMappedEpisodes}/${expectedEpisodes} episodes mapped`);
 
                     if (!options.interactive) {
@@ -2903,7 +2670,7 @@ async function ripAllTracks() {
             console.log(`  ⚙️  Track ${titleNumber} of ${numTitles}: ${finalFileName}`);
 
             try {
-                await ripDvd(titleNumber, finalFileName.replace('.mp4', ''), titleNumber, numTitles, (progress, elapsed, remaining, trackNum, totalTracks) => {
+                await ripDvd(titleNumber, finalFileName.replace('.mp4', ''), titleNumber, numTitles, (progress, elapsed, remaining, _trackNum, _totalTracks) => {
                     // Overwrite the same line for progress updates
                     const progressBar = createProgressBar(progress);
                     const elapsedStr = formatTime(elapsed);
@@ -3513,6 +3280,7 @@ Options:
                     Useful for getting bonus content, secret tracks, etc.
   --dry-run         Create stub files instead of actual ripping
                     Useful for testing the workflow without waiting for encoding
+  --help-dev        Show developer commands (make, npm, testing)
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
@@ -3521,7 +3289,59 @@ Example:
   node juiceit.js --rename-only --output ./output  # Rename existing files
   node juiceit.js --raw  # Quick raw rip without metadata or AI
 `);
+}
 
+// Show developer help function
+function showDeveloperHelp() {
+    console.log(`
+JuiceIt - Developer Commands
+
+Local Development:
+  make help                   Show all make targets
+  make install                Install npm dependencies
+  make test                   Run all automated tests
+  make reinstall              Link to local code (runs tests first)
+  make reinstall-release      Install from latest GitHub release
+
+  Workflow:
+    1. make reinstall         (links local code)
+    2. Edit code
+    3. Test with 'juiceit'    (changes are instant, no rebuild!)
+
+Testing:
+  npm test                    Run all test suites
+  npm run test:core           Core functionality tests only
+  npm run test:prompts        Prompt/schema tests only
+  npm run test:runtime        Runtime analysis tests only
+  npm run test:openai         OpenAI API integration tests only
+  npm run demo                Run interactive mapping demo
+
+  make test                   Alias for npm test
+  make demo                   Alias for npm run demo
+
+Debugging:
+  juiceit --diagnose          Detailed mapping analysis for debugging
+  juiceit --verbose           Show HandBrakeCLI output during ripping
+  juiceit --dry-run           Create stub files instead of encoding
+
+Release:
+  make release                Create a new release (interactive)
+  npm run release             Run standard-version and release script
+
+File Locations:
+  Config:     ~/.config/juice-it/config.json
+  Cache:      ~/Library/Caches/juice-it/*.json
+  Logs:       ./<output_dir>/rip-log-*.txt
+
+Cleanup:
+  rm -rf test/test-output     Clean test artifacts
+  rm -rf ~/Library/Caches/juice-it    Clean disc cache
+  rm -rf ~/.config/juice-it   Clean config (removes API keys)
+
+Documentation:
+  README.md                   Main documentation
+  CONTRIBUTING.md             Development guidelines
+`);
 }
 
 // Check for dependencies before starting

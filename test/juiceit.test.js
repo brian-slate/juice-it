@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const assert = require('assert');
 const { spawnSync } = require('child_process');
 
@@ -8,7 +7,6 @@ const { spawnSync } = require('child_process');
 const TEST_ROOT = path.join(__dirname, 'test-output');
 const TEST_CONFIG_DIR = path.join(TEST_ROOT, 'config');
 const TEST_OUTPUT_DIR = path.join(TEST_ROOT, 'output');
-const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 
 // Helper to run juiceit with custom config
 function runJuiceIt(args, env = {}) {

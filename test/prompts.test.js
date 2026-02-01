@@ -13,7 +13,6 @@ const assert = require('assert');
 const {
     loadTemplate,
     interpolate,
-    renderPrompt,
     clearCache,
     buildTmdbMatchPrompts,
     buildTrackMappingPrompts
@@ -135,7 +134,8 @@ function testInterpolateMissingVariables() {
     setup();
 
     const template = 'Hello {{name}}, your ID is {{id}}.';
-    const result = interpolate(template, { name: 'Bob' });
+    // Use silent: true to suppress warning during test (we're testing intentional missing var)
+    const result = interpolate(template, { name: 'Bob' }, { silent: true });
 
     assert.strictEqual(result, 'Hello Bob, your ID is {{id}}.', 'Missing variables should be preserved');
 

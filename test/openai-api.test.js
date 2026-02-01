@@ -179,11 +179,14 @@ function testZodImportInCode() {
     const juiceitPath = path.join(__dirname, '../juiceit.js');
     const content = fs.readFileSync(juiceitPath, 'utf8');
 
-    const importsZod = content.includes("require('zod')") || content.includes('require("zod")');
+    // juiceit.js imports zodResponseFormat from openai/helpers/zod
+    // (Zod schemas are defined in prompts/schemas.js which imports 'zod' directly)
     const importsZodHelper = content.includes('zodResponseFormat');
+    const importsFromOpenAI = content.includes("require('openai/helpers/zod')") ||
+                              content.includes('require("openai/helpers/zod")');
 
-    assert.strictEqual(importsZod, true, 'Code should import zod');
     assert.strictEqual(importsZodHelper, true, 'Code should import zodResponseFormat');
+    assert.strictEqual(importsFromOpenAI, true, 'Code should import from openai/helpers/zod');
 
     console.log('  ✓ PASS\n');
 }

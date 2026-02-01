@@ -1,24 +1,24 @@
-.PHONY: help test test-core test-prompts test-runtime test-openai demo install reinstall release diagnose
+.PHONY: help test test-core test-prompts test-runtime test-openai demo install reinstall reinstall-release release diagnose
 
 help:
 	@echo "JuiceIt Development Commands"
 	@echo ""
-	@echo "  make install       - Install npm dependencies"
-	@echo "  make test          - Run all automated tests"
-	@echo "  make test-core     - Run core functionality tests only"
-	@echo "  make test-prompts  - Run prompt/schema tests only"
-	@echo "  make test-runtime  - Run runtime analysis tests only"
-	@echo "  make test-openai   - Run OpenAI API integration tests only"
-	@echo "  make demo          - Run interactive mapping demo"
-	@echo "  make diagnose      - Run diagnostic mode (analyze disc and mapping)"
-	@echo "  make reinstall     - Reinstall in Homebrew for local testing"
-	@echo "  make release       - Create a new release (see RELEASE.md)"
+	@echo "  make install           - Install npm dependencies"
+	@echo "  make test              - Run all automated tests"
+	@echo "  make test-core         - Run core functionality tests only"
+	@echo "  make test-prompts      - Run prompt/schema tests only"
+	@echo "  make test-runtime      - Run runtime analysis tests only"
+	@echo "  make test-openai       - Run OpenAI API integration tests only"
+	@echo "  make demo              - Run interactive mapping demo"
+	@echo "  make diagnose          - Run diagnostic mode (analyze disc and mapping)"
+	@echo "  make reinstall         - Link to local code (npm link, runs tests first)"
+	@echo "  make reinstall-release - Install from latest GitHub release"
+	@echo "  make release           - Create a new release (see RELEASE.md)"
 	@echo ""
-	@echo "Local Testing Workflow:"
-	@echo "  1. Edit code"
-	@echo "  2. Commit changes"
-	@echo "  3. make reinstall"
-	@echo "  4. Test with 'juiceit' command"
+	@echo "Local Development:"
+	@echo "  1. make reinstall      (links local code, changes are instant)"
+	@echo "  2. Edit code"
+	@echo "  3. Test with 'juiceit' or 'juice-it' (no rebuild needed!)"
 	@echo ""
 
 install:
@@ -48,8 +48,10 @@ diagnose:
 	@node juiceit.js --diagnose
 
 reinstall:
-	@echo "Reinstalling in Homebrew for testing..."
-	@./bin/update-homebrew.sh
+	@./bin/update-homebrew.sh --local
+
+reinstall-release:
+	@./bin/update-homebrew.sh --release
 
 release:
 	@echo "Creating release..."

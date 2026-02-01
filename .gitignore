@@ -37,6 +37,9 @@ package-lock.json
 dist/
 build/
 *.tar.gz
+.homebrew-staging/
+.homebrew-dev.tar.gz
+.homebrew-release.tar.gz
 
 # Environment and secrets
 .env

@@ -16,7 +16,7 @@ handbrakeProcess.stderr.on('data', function(data) {
     output += data.toString();
 });
 
-handbrakeProcess.on('close', (exitCode) => {
+handbrakeProcess.on('close', (_exitCode) => {
     console.log('=== PARSING DURATIONS ===\n');
     
     const titleDurations = {};

@@ -39,11 +39,14 @@ function loadTemplate(templateName) {
  *
  * @param {string} template - The template string
  * @param {Object} variables - Key-value pairs of variables to interpolate
+ * @param {Object} options - Optional settings
+ * @param {boolean} options.silent - Suppress warnings for missing variables (default: false)
  * @returns {string} The interpolated template
  */
-function interpolate(template, variables) {
+function interpolate(template, variables, options = {}) {
+    const { silent = false } = options;
     return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-        if (variables.hasOwnProperty(key)) {
+        if (Object.hasOwn(variables, key)) {
             const value = variables[key];
             // Handle objects/arrays by converting to JSON string
             if (typeof value === 'object') {
@@ -52,7 +55,9 @@ function interpolate(template, variables) {
             return String(value);
         }
         // Leave unmatched variables as-is (for debugging)
-        console.warn(`Warning: Template variable '${key}' not provided`);
+        if (!silent) {
+            console.warn(`Warning: Template variable '${key}' not provided`);
+        }
         return match;
     });
 }
@@ -116,7 +121,7 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
     const episodes = metadata.episodes || [];
 
     // Build episode table (raw data, no analysis)
-    const episodeTable = episodes.map((ep, i) =>
+    const episodeTable = episodes.map((ep, _i) =>
         `| ${ep.episode_number} | ${ep.runtime || '?'} min | ${ep.name || 'Untitled'} |`
     ).join('\n');
     const episodeTableFormatted = `| Ep# | Runtime | Title |\n|-----|---------|-------|\n${episodeTable}`;
