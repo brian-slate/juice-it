@@ -1,0 +1,20 @@
+{
+  "description": "Hour-long drama like Breaking Bad (45-58 min episodes)",
+  "episodes": [
+    { "episode_number": 1, "name": "Pilot", "runtime": 58 },
+    { "episode_number": 2, "name": "Cat's in the Bag...", "runtime": 48 },
+    { "episode_number": 3, "name": "...And the Bag's in the River", "runtime": 48 },
+    { "episode_number": 4, "name": "Cancer Man", "runtime": 48 },
+    { "episode_number": 5, "name": "Gray Matter", "runtime": 48 },
+    { "episode_number": 6, "name": "Crazy Handful of Nothin'", "runtime": 47 },
+    { "episode_number": 7, "name": "A No-Rough-Stuff-Type Deal", "runtime": 47 }
+  ],
+  "expected": {
+    "min": 47,
+    "max": 58,
+    "avg": 49,
+    "variance": 11,
+    "tolerance": 6,
+    "format": "hour format (drama, procedural)"
+  }
+}

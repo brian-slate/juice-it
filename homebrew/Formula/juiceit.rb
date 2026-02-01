@@ -2,13 +2,14 @@ class Juiceit < Formula
   desc "Smart DVD ripper with automatic metadata lookup and episode naming"
   homepage "https://github.com/brian-slate/juice-it"
   url "file:///Users/brianslate/code/personal/juice-it", using: :git, branch: "interactive-episode-mapping"
-  version "1.0.11-dev"
+  version "1.1.0"
   license "MIT"
 
   depends_on "node"
   depends_on "handbrake"
   depends_on "libdvdcss"
-  depends_on "ffmpeg"  # For ffprobe to check video durations
+  depends_on "ffmpeg"   # For ffprobe to check video durations
+  depends_on "lsdvd"    # For extended disc metadata (chapters, audio streams, subtitles)
 
   def install
     # Install all files to libexec first
@@ -27,17 +28,17 @@ class Juiceit < Formula
   def caveats
     <<~EOS
       🎬 JuiceIt installed successfully!
-      
+
       📋 Next Steps:
       1. Get a free TMDB API key:
          https://www.themoviedb.org/settings/api
-      
+
       2. Run setup:
          juiceit --setup
-      
+
       3. Insert a DVD and run:
          juiceit
-      
+
       For help: juiceit --help
     EOS
   end

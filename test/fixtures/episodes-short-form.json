@@ -1,0 +1,21 @@
+{
+  "description": "Short-form show like Look Around You (9-10 min episodes)",
+  "episodes": [
+    { "episode_number": 1, "name": "Maths", "runtime": 9 },
+    { "episode_number": 2, "name": "Water", "runtime": 9 },
+    { "episode_number": 3, "name": "Germs", "runtime": 10 },
+    { "episode_number": 4, "name": "Ghosts", "runtime": 9 },
+    { "episode_number": 5, "name": "Sulphur", "runtime": 10 },
+    { "episode_number": 6, "name": "Music", "runtime": 9 },
+    { "episode_number": 7, "name": "Iron", "runtime": 9 },
+    { "episode_number": 8, "name": "Brain", "runtime": 10 }
+  ],
+  "expected": {
+    "min": 9,
+    "max": 10,
+    "avg": 9,
+    "variance": 1,
+    "tolerance": 2,
+    "format": "short-form (web series, shorts)"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "Look Around You DVD track durations (includes menus and extras)",
+  "volumeName": "LOOK_AROUND_YOU_D1",
+  "tracks": {
+    "1": 9,
+    "2": 13,
+    "3": 9,
+    "4": 10,
+    "5": 9,
+    "6": 10,
+    "7": 9,
+    "8": 9,
+    "9": 10,
+    "10": 2,
+    "11": 1,
+    "12": 0
+  },
+  "expectedEpisodeTracks": [1, 3, 4, 5, 6, 7, 8, 9],
+  "expectedSkipTracks": [2, 10, 11, 12],
+  "notes": "Track 2 (13 min) is behind-the-scenes, tracks 10-12 are menus"
+}

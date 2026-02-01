@@ -32,6 +32,15 @@ const fs = require('fs');
 const axios = require('axios');
 const { Select, Input, AutoComplete } = require('enquirer');
 const OpenAI = require('openai');
+const { z } = require('zod');
+const { zodResponseFormat } = require('openai/helpers/zod');
+
+// Prompt templates and schemas
+const { buildTmdbMatchPrompts, buildTrackMappingPrompts } = require('./prompts/loader');
+const { TmdbMatchSchema, TrackMappingResponseSchema } = require('./prompts/schemas');
+
+// AI configuration
+const aiConfig = require('./config/ai-config');
 
 // ==================== LOGGING ====================
 
@@ -164,7 +173,7 @@ async function validateOpenAiApiKey(apiKey) {
     try {
         const openai = new OpenAI({ apiKey });
         await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: aiConfig.model,
             messages: [{ role: 'user', content: 'test' }],
             max_tokens: 5
         });
@@ -176,8 +185,19 @@ async function validateOpenAiApiKey(apiKey) {
 
 // ==================== AI HELPERS ====================
 
-// Call OpenAI with error handling and timeout
-async function callOpenAI(systemMessage, userMessage) {
+/**
+ * Call OpenAI with optional structured output validation
+ *
+ * @param {string} systemMessage - System prompt for the AI
+ * @param {string} userMessage - User prompt with the task details
+ * @param {Object} opts - Optional configuration
+ * @param {z.ZodSchema} opts.schema - Zod schema for structured output validation
+ * @param {string} opts.schemaName - Name for the response format (required if schema provided)
+ * @returns {Promise<Object|null>} Parsed and validated response, or null on error
+ */
+async function callOpenAI(systemMessage, userMessage, opts = {}) {
+    const { schema, schemaName } = opts;
+
     try {
         const config = loadConfig();
         if (!config.openaiApiKey) {
@@ -186,45 +206,106 @@ async function callOpenAI(systemMessage, userMessage) {
             }
             return null;
         }
-        
+
+        // Use structured output if schema provided and config allows
+        const useStructured = schema && schemaName && aiConfig.useStructuredOutput;
+
         if (options.verbose) {
             console.log('\n[AI] Calling OpenAI API...');
-            console.log('[AI] Model: gpt-4o-mini');
+            console.log(`[AI] Model: ${aiConfig.model}`);
+            console.log(`[AI] Temperature: ${aiConfig.temperature}`);
+            console.log('[AI] Structured output:', useStructured ? 'Yes (Zod schema)' : 'No (JSON mode)');
             console.log('[AI] System message:', systemMessage.substring(0, 100) + '...');
             console.log('[AI] User message length:', userMessage.length, 'chars');
         }
-        log('AI: Calling OpenAI API with gpt-4o-mini');
+        log(`AI: Calling OpenAI API with ${aiConfig.model}`);
+        log(`AI: Temperature: ${aiConfig.temperature}`);
+        log(`AI: Structured output: ${useStructured ? 'Yes (Zod schema)' : 'No (JSON mode)'}`);
         log(`AI: User message length: ${userMessage.length} chars`);
-        
-        const openai = new OpenAI({ 
-            apiKey: config.openaiApiKey,
-            timeout: 30000 // 30 second timeout
+        log('AI: === PROMPT START ===');
+        log(`AI: System: ${systemMessage}`);
+        log(`AI: User: ${userMessage}`);
+        log('AI: === PROMPT END ===');
+
+        const openai = new OpenAI({
+            apiKey: config.openaiApiKey
+            // No timeout - we wait for AI to complete, showing progress messages
         });
-        
+
         const startTime = Date.now();
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-                { role: 'system', content: systemMessage },
-                { role: 'user', content: userMessage }
-            ],
-            temperature: 0.1,
-            response_format: { type: 'json_object' }
-        });
+
+        // Show clean progress indicator (update once per second)
+        process.stdout.write('   ⏳ Waiting for AI');
+        const progressInterval = setInterval(() => {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            process.stdout.write('.');
+            if (elapsed === aiConfig.slowResponseWarningSeconds) {
+                process.stdout.write(' (taking longer than expected)');
+            }
+        }, 1000);
+
+        let result;
+        let tokenUsage;
+        try {
+            if (useStructured) {
+                // Use structured output with Zod schema validation
+                // Note: In OpenAI SDK v6+, parse() is on chat.completions, not beta.chat.completions
+                const response = await openai.chat.completions.parse({
+                    model: aiConfig.model,
+                    messages: [
+                        { role: 'system', content: systemMessage },
+                        { role: 'user', content: userMessage }
+                    ],
+                    temperature: aiConfig.temperature,
+                    response_format: zodResponseFormat(schema, schemaName)
+                });
+
+                tokenUsage = response.usage;
+
+                // Handle refusals
+                if (response.choices[0].message.refusal) {
+                    log(`AI: Refusal: ${response.choices[0].message.refusal}`);
+                    if (options.verbose) {
+                        console.log(`[AI] Refusal: ${response.choices[0].message.refusal}`);
+                    }
+                    return null;
+                }
+
+                // Get the parsed and validated result
+                result = response.choices[0].message.parsed;
+            } else {
+                // Fallback to JSON mode for backward compatibility
+                const response = await openai.chat.completions.create({
+                    model: aiConfig.model,
+                    messages: [
+                        { role: 'system', content: systemMessage },
+                        { role: 'user', content: userMessage }
+                    ],
+                    temperature: aiConfig.temperature,
+                    response_format: { type: 'json_object' }
+                });
+
+                tokenUsage = response.usage;
+                const content = response.choices[0].message.content;
+                result = JSON.parse(content);
+            }
+        } finally {
+            clearInterval(progressInterval);
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            process.stdout.write(` done (${elapsed}s)\n`);
+        }
+
         const elapsed = Date.now() - startTime;
-        
-        const content = response.choices[0].message.content;
-        const result = JSON.parse(content);
-        
+
         if (options.verbose) {
             console.log(`[AI] Response received in ${elapsed}ms`);
-            console.log('[AI] Tokens used:', response.usage.total_tokens);
+            console.log('[AI] Tokens used:', tokenUsage.total_tokens);
             console.log('[AI] Response:', JSON.stringify(result, null, 2));
         }
         log(`AI: Response received in ${elapsed}ms`);
-        log(`AI: Tokens - prompt: ${response.usage.prompt_tokens}, completion: ${response.usage.completion_tokens}, total: ${response.usage.total_tokens}`);
+        log(`AI: Tokens - prompt: ${tokenUsage.prompt_tokens}, completion: ${tokenUsage.completion_tokens}, total: ${tokenUsage.total_tokens}`);
         log(`AI: Response: ${JSON.stringify(result)}`);
-        
+
         return result;
     } catch (error) {
         if (options.verbose) {
@@ -238,7 +319,9 @@ async function callOpenAI(systemMessage, userMessage) {
 // AI-powered TMDB match selection
 async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults) {
     try {
-        console.log('\n🤖 Using AI to analyze disc and select best match...');
+        if (!options.diagnose) {
+            console.log('\n🤖 Using AI to analyze disc and select best match...');
+        }
         if (options.verbose) {
             console.log('[AI] Starting TMDB match selection');
             console.log('[AI] Analyzing:', volumeName, 'with', numTitles, 'tracks');
@@ -249,52 +332,22 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
         log(`AI: Disc - ${volumeName} with ${numTitles} tracks`);
         log(`AI: Track durations - ${JSON.stringify(trackDurations)}`);
         log(`AI: TMDB results - ${movieResults.length} movies, ${tvResults.length} TV shows`);
-        
-        const systemMessage = `You are an expert at analyzing DVD disc metadata to identify TV shows and movies. 
-You must respond with valid JSON only.`;
-        
-        const tmdbData = {
-            movies: movieResults.slice(0, 5).map(m => ({
-                id: m.id,
-                title: m.title,
-                year: m.release_date ? m.release_date.split('-')[0] : null,
-                overview: m.overview ? m.overview.substring(0, 200) : ''
-            })),
-            tvShows: tvResults.slice(0, 5).map(s => ({
-                id: s.id,
-                name: s.name,
-                firstAirYear: s.first_air_date ? s.first_air_date.split('-')[0] : null,
-                overview: s.overview ? s.overview.substring(0, 200) : ''
-            }))
-        };
-        
-        const userMessage = `Analyze this DVD disc and determine which TMDB entry is correct.
 
-Disc Information:
-- Volume Name: "${volumeName}"
-- Total Tracks: ${numTitles}
-- Track Durations (minutes): ${JSON.stringify(trackDurations)}
+        // Build prompts from templates
+        const { system, user } = buildTmdbMatchPrompts({
+            volumeName,
+            numTitles,
+            trackDurations,
+            movieResults,
+            tvResults
+        });
 
-TMDB Search Results:
-${JSON.stringify(tmdbData, null, 2)}
+        // Call OpenAI with structured output validation
+        const result = await callOpenAI(system, user, {
+            schema: TmdbMatchSchema,
+            schemaName: aiConfig.schemaNames.tmdbMatch
+        });
 
-Task: Determine which TMDB entry is the correct match.
-Consider:
-- Does the volume name match any title?
-- Does track count suggest TV show (multiple episodes) or movie?
-- Do track durations align with typical TV episode length (~20-45min) or movie length (>90min)?
-
-Respond with JSON only:
-{
-  "selectedId": number or null,
-  "selectedType": "tv" or "movie" or null,
-  "confidence": 0.0-1.0,
-  "reasoning": "brief explanation",
-  "season": number (for TV only, best guess based on disc name)
-}`;
-        
-        const result = await callOpenAI(systemMessage, userMessage);
-        
         if (result && result.selectedId) {
             console.log(`   ✓ AI selected: ${result.selectedType === 'tv' ? 'TV' : 'Movie'} (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
             console.log(`   Reasoning: ${result.reasoning}`);
@@ -306,7 +359,7 @@ Respond with JSON only:
         } else if (options.verbose) {
             console.log('[AI] No match selected or low confidence');
         }
-        
+
         return result;
     } catch (error) {
         if (options.verbose) {
@@ -316,103 +369,125 @@ Respond with JSON only:
     }
 }
 
-// AI-powered track mapping
-async function aiMapTracks(trackDurations, metadata) {
+// Analyze episode metadata to derive show-specific runtime characteristics
+function analyzeEpisodeRuntimes(episodes) {
+    if (!episodes || episodes.length === 0) {
+        return null;
+    }
+
+    const runtimes = episodes.map(ep => ep.runtime || 0).filter(r => r > 0);
+    if (runtimes.length === 0) {
+        return null;
+    }
+
+    const min = Math.min(...runtimes);
+    const max = Math.max(...runtimes);
+    const avg = Math.round(runtimes.reduce((a, b) => a + b, 0) / runtimes.length);
+    const variance = max - min;
+
+    // Calculate a reasonable tolerance based on the show's own variance
+    // If episodes are consistent (variance < 5 min), use tighter tolerance
+    // If episodes vary more, use looser tolerance
+    let tolerance;
+    if (variance <= 2) {
+        tolerance = 2; // Very consistent show (e.g., all 9 min)
+    } else if (variance <= 5) {
+        tolerance = 3; // Somewhat consistent
+    } else if (variance <= 10) {
+        tolerance = 5; // Moderate variance
+    } else {
+        tolerance = Math.ceil(variance / 2); // High variance, be more flexible
+    }
+
+    // Determine show format
+    let format;
+    if (avg <= 15) {
+        format = 'short-form (web series, shorts)';
+    } else if (avg <= 35) {
+        format = 'half-hour format (sitcom, animation, etc.)';
+    } else if (avg <= 50) {
+        format = 'hour format (drama, procedural)';
+    } else if (avg <= 70) {
+        format = 'extended episode format';
+    } else {
+        format = 'movie/special length';
+    }
+
+    return {
+        min,
+        max,
+        avg,
+        variance,
+        tolerance,
+        format,
+        runtimes,
+        episodeCount: episodes.length
+    };
+}
+
+// AI-powered track mapping (Option C: Raw data + soft guidance)
+async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
     try {
         console.log('\n🤖 Using AI to map tracks to episodes...');
         if (options.verbose) {
-            console.log('[AI] Starting track mapping');
+            console.log('[AI] Starting track mapping (Option C: raw data + soft guidance)');
             console.log('[AI] Track count:', Object.keys(trackDurations).length);
             console.log('[AI] Content type:', metadata.type);
             console.log('[AI] Episodes available:', metadata.episodes ? metadata.episodes.length : 'N/A');
+            console.log('[AI] lsdvd metadata:', lsdvdMetadata ? 'available' : 'not available');
         }
-        log('AI: Starting track mapping');
+        log('AI: Starting track mapping (Option C)');
         log(`AI: Track count - ${Object.keys(trackDurations).length}`);
         log(`AI: Content type - ${metadata.type}`);
         log(`AI: Episodes - ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
-        
-        const systemMessage = `You are an expert at mapping DVD tracks to TV episodes or movie content.
-You must respond with valid JSON only.`;
-        
-        const trackInfo = Object.entries(trackDurations).map(([trackNum, duration]) => ({
-            trackNum: parseInt(trackNum),
-            duration
-        }));
-        
-        const contentInfo = metadata.type === 'tv' && metadata.episodes ? {
-            type: 'tv',
-            season: metadata.season,
-            episodes: metadata.episodes.map(ep => ({
-                episodeNumber: ep.episode_number,
-                name: ep.name,
-                runtime: ep.runtime
-            }))
-        } : {
-            type: metadata.type,
-            name: metadata.name
-        };
-        
-        const episodeCount = metadata.episodes ? metadata.episodes.length : 0;
-        const avgRuntime = metadata.episodes ? Math.round(metadata.episodes.reduce((sum, ep) => sum + (ep.runtime || 25), 0) / episodeCount) : 25;
-        
-        const userMessage = `Map DVD tracks to episodes/content.
+        log(`AI: lsdvd metadata - ${lsdvdMetadata ? 'available' : 'not available'}`);
 
-DVD Track Information:
-${JSON.stringify(trackInfo, null, 2)}
+        // Analyze episode runtimes for soft guidance (not hard rules)
+        const episodes = metadata.episodes || [];
+        const runtimeAnalysis = analyzeEpisodeRuntimes(episodes);
 
-Content Metadata:
-${JSON.stringify(contentInfo, null, 2)}
+        // Build prompts from templates (Option C structure with raw data + soft guidance)
+        // Note: buildTrackMappingPrompts now handles all formatting internally
+        const { system, user } = buildTrackMappingPrompts({
+            metadata,
+            trackDurations,
+            runtimeAnalysis,
+            lsdvdMetadata
+        });
 
-Important Context:
-- Total ${trackInfo.length} tracks detected on disc
-- Expected ${episodeCount} episodes with average runtime of ~${avgRuntime} minutes
-- Tracks may be non-sequential (episodes at tracks 1-3, 17-23 with menus in between)
-- Some track durations may show as 0 if parsing failed - skip these
+        // Call OpenAI with structured output validation
+        const result = await callOpenAI(system, user, {
+            schema: TrackMappingResponseSchema,
+            schemaName: aiConfig.schemaNames.trackMapping
+        });
 
-Task: Map each DVD track to an episode or mark as skip.
-Your goal is to find exactly ${episodeCount} tracks that match the episode runtimes.
-
-Guidelines:
-- Match track durations to episode runtimes (within 3-10 minutes is acceptable)
-- Tracks with 0 duration should be skipped (data parsing failed)
-- Very short tracks (<3 min) are typically menus unless matching an episode runtime
-- Episodes may be at non-sequential track numbers
-- Find all ${episodeCount} episode-length tracks and map them, mark the rest as skip
-
-Respond with JSON only:
-{
-  "mappings": [
-    {
-      "trackNum": number,
-      "episodeIndex": number or null (0-based index into episodes array),
-      "shouldSkip": boolean,
-      "confidence": 0.0-1.0,
-      "reasoning": "brief explanation"
-    }
-  ],
-  "overallConfidence": 0.0-1.0
-}`;
-        
-        const result = await callOpenAI(systemMessage, userMessage);
-        
         if (result && result.mappings) {
             const skipCount = result.mappings.filter(m => m.shouldSkip).length;
             const mapCount = result.mappings.length - skipCount;
             console.log(`   ✓ AI mapped ${mapCount} tracks, marked ${skipCount} to skip`);
             console.log(`   Overall confidence: ${(result.overallConfidence * 100).toFixed(0)}%`);
-            if (options.verbose) {
-                console.log('[AI] Detailed mappings:');
-                result.mappings.forEach(m => {
-                    const action = m.shouldSkip ? 'SKIP' : `Episode ${m.episodeIndex !== null ? m.episodeIndex + 1 : '?'}`;
-                    console.log(`[AI]   Track ${m.trackNum}: ${action} (${(m.confidence * 100).toFixed(0)}% - ${m.reasoning})`);
-                });
-            }
-            log(`AI track mapping: ${JSON.stringify(result)}`);
-        } else if (options.verbose) {
-            console.log('[AI] No mappings returned');
+
+            // Log detailed mappings
+            log('AI: === MAPPING RESULTS ===');
+            result.mappings.forEach(m => {
+                const action = m.shouldSkip ? 'SKIP' : `Episode ${m.episodeIndex !== null ? m.episodeIndex + 1 : '?'}`;
+                const episodeName = !m.shouldSkip && m.episodeIndex !== null && episodes[m.episodeIndex]
+                    ? ` (${episodes[m.episodeIndex].name})` : '';
+                log(`AI: Track ${m.trackNum} (${m.trackDuration} min) → ${action}${episodeName} [${(m.confidence * 100).toFixed(0)}%] - ${m.reasoning}`);
+                if (options.verbose) {
+                    console.log(`[AI]   Track ${m.trackNum}: ${action}${episodeName} (${(m.confidence * 100).toFixed(0)}% - ${m.reasoning})`);
+                }
+            });
+            log('AI: === END MAPPING RESULTS ===');
+            log(`AI track mapping full response: ${JSON.stringify(result)}`);
+            return result;
+        } else {
+            // AI mapping failed - show prominent warning
+            console.log('   ⚠️  AI mapping FAILED - will fall back to sequential mapping');
+            console.log('   ⚠️  This may result in incorrect track-to-episode assignments!');
+            log('AI: MAPPING FAILED - falling back to sequential mapping');
+            return null;
         }
-        
-        return result;
     } catch (error) {
         if (options.verbose) {
             console.log(`\nAI mapping error: ${error.message}`);
@@ -811,18 +886,25 @@ args.forEach((arg, index) => {
         options.runSetup = true; // Run API key setup
     } else if (arg === '--plan') {
         options.planOnly = true; // Only create a plan, don't rip
+    } else if (arg === '--yes' || arg === '-y') {
+        options.autoAccept = true; // Auto-accept AI mapping without prompts
+    } else if (arg === '--diagnose') {
+        options.diagnose = true; // Run diagnostic mode - detailed mapping analysis
     }
 });
 
 // Helper function to set default output directory
 function setDefaultOutputDir(volumeName) {
     if (!options.outputDir) {
-        // Use local date instead of UTC
+        // Use local date and time for unique folder per run
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const day = String(now.getDate()).padStart(2, '0');
-        const timestamp = `${year}-${month}-${day}`; // YYYY-MM-DD in local time
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const timestamp = `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`; // YYYY-MM-DD_HH-MM-SS
         const safeName = volumeName.replace(/[^a-zA-Z0-9_-]/g, '_');
         options.outputDir = path.join(process.cwd(), `${safeName}_${timestamp}`);
     }
@@ -916,6 +998,117 @@ function checkLibdvdcss() {
         console.error("libdvdcss is not installed. Please install it using 'brew install libdvdcss' to use this script.");
         process.exit(1);
     }
+}
+
+// Check if lsdvd is available (optional - provides additional metadata)
+function checkLsdvd() {
+    const result = spawnSync('which', ['lsdvd']);
+    return result.status === 0;
+}
+
+/**
+ * Get extended disc metadata using lsdvd
+ * Returns additional info like chapters, audio streams, and subtitles per track
+ * This provides context that HandBrakeCLI's scan doesn't give us
+ *
+ * @param {string} dvdSource - The DVD device path
+ * @returns {Object|null} Parsed lsdvd data or null if unavailable
+ */
+function getLsdvdMetadata(dvdSource) {
+    if (!checkLsdvd()) {
+        if (options.verbose) {
+            console.log('[lsdvd] Not installed, skipping extended metadata');
+        }
+        return null;
+    }
+
+    try {
+        const result = spawnSync('lsdvd', [dvdSource], {
+            encoding: 'utf8',
+            timeout: 30000
+        });
+
+        if (result.error || result.status !== 0) {
+            if (options.verbose) {
+                console.log('[lsdvd] Failed to read disc:', result.stderr || result.error?.message);
+            }
+            return null;
+        }
+
+        const output = result.stdout + result.stderr; // lsdvd outputs to both
+        return parseLsdvdOutput(output);
+    } catch (error) {
+        if (options.verbose) {
+            console.log('[lsdvd] Error:', error.message);
+        }
+        return null;
+    }
+}
+
+/**
+ * Parse lsdvd text output into structured data
+ *
+ * @param {string} output - Raw lsdvd output
+ * @returns {Object} Parsed metadata
+ */
+function parseLsdvdOutput(output) {
+    const metadata = {
+        discTitle: 'unknown',
+        discId: null,
+        longestTrack: null,
+        tracks: {}
+    };
+
+    const lines = output.split('\n');
+
+    for (const line of lines) {
+        // Parse disc title
+        const discTitleMatch = line.match(/^Disc Title:\s*(.+)$/i);
+        if (discTitleMatch) {
+            metadata.discTitle = discTitleMatch[1].trim();
+            continue;
+        }
+
+        // Parse DVD Disc ID
+        const discIdMatch = line.match(/^DVDDiscID:\s*(.+)$/i);
+        if (discIdMatch) {
+            metadata.discId = discIdMatch[1].trim();
+            continue;
+        }
+
+        // Parse longest track
+        const longestMatch = line.match(/^Longest track:\s*(\d+)$/i);
+        if (longestMatch) {
+            metadata.longestTrack = parseInt(longestMatch[1], 10);
+            continue;
+        }
+
+        // Parse track info: Title: 01, Length: 00:08:47.000 Chapters: 01, Cells: 01, Audio streams: 03, Subpictures: 02
+        const trackMatch = line.match(/^Title:\s*(\d+),\s*Length:\s*([\d:.]+)\s*Chapters:\s*(\d+),\s*Cells:\s*(\d+),\s*Audio streams:\s*(\d+),\s*Subpictures:\s*(\d+)/i);
+        if (trackMatch) {
+            const trackNum = parseInt(trackMatch[1], 10);
+            const length = trackMatch[2];
+            const chapters = parseInt(trackMatch[3], 10);
+            const cells = parseInt(trackMatch[4], 10);
+            const audioStreams = parseInt(trackMatch[5], 10);
+            const subpictures = parseInt(trackMatch[6], 10);
+
+            // Parse length to minutes
+            const [hours, mins, secs] = length.split(':').map(parseFloat);
+            const durationMinutes = Math.round(hours * 60 + mins + secs / 60);
+
+            metadata.tracks[trackNum] = {
+                length,
+                durationMinutes,
+                chapters,
+                cells,
+                audioStreams,
+                subpictures
+            };
+        }
+    }
+
+    return metadata;
 }
 
 // Function to detect all DVD drives
@@ -1021,6 +1214,11 @@ if (options.runSetup) {
         await runSetup();
     })();
     // Exit early - don't continue to ripping
+} else if (options.diagnose) {
+    // Run diagnostic mode
+    (async () => {
+        await runDiagnosticMode();
+    })();
 } else {
     // Show API key status messages
     if (!options.noLookup) {
@@ -1192,51 +1390,112 @@ async function getNumberOfTitles() {
     }
 
     // Fetch title information if cache is not valid
-    // Use spawnSync for reliability - scan is a one-shot operation
+    // Use spawn with real-time output for track-by-track progress display
     console.log('');
-    
-    const args = ['-i', options.dvdSource, '--title', '0', '--scan'];
-    
+
+    // Use --previews 0:0 to skip preview generation entirely - we only need title/duration info
+    const args = ['-i', options.dvdSource, '--title', '0', '--scan', '--previews', '0:0'];
+
     if (options.verbose) {
         console.log(`Running: HandBrakeCLI ${args.join(' ')}`);
     }
-    
-    const result = spawnSync('HandBrakeCLI', args, {
-        encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large outputs
+
+    // Use Promise-wrapped spawn for real-time output
+    const scanResult = await new Promise((resolve, reject) => {
+        const handbrakeProcess = spawn('HandBrakeCLI', args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let output = '';
+        let totalTitles = 0;
+        let lastReportedTitle = 0;
+        let scannedTitlesCount = 0;
+        const titleDurations = {};
+        let resolved = false;
+
+        const processData = (data) => {
+            if (resolved) return; // Stop processing after we resolve
+
+            const chunk = data.toString();
+            output += chunk;
+
+            if (options.verbose) {
+                process.stdout.write(chunk);
+            }
+
+            // Check for total title count
+            const totalMatch = chunk.match(/scan: DVD has (\d+) title/);
+            if (totalMatch) {
+                totalTitles = parseInt(totalMatch[1], 10);
+                console.log(`   Found ${totalTitles} title${totalTitles > 1 ? 's' : ''} - scanning each...`);
+            }
+
+            // Check for current title being scanned and show progress
+            const scanningMatch = chunk.match(/scan: scanning title (\d+)/);
+            if (scanningMatch) {
+                const currentTitle = parseInt(scanningMatch[1], 10);
+                if (currentTitle > lastReportedTitle) {
+                    lastReportedTitle = currentTitle;
+                    process.stdout.write(`\r   Scanning track ${currentTitle}${totalTitles > 0 ? ' of ' + totalTitles : ''}...`);
+                }
+            }
+
+            // Parse duration for completed titles
+            const durationMatch = chunk.match(/scan: duration is (\d{2}):(\d{2}):(\d{2})/);
+            if (durationMatch && lastReportedTitle > 0) {
+                const hours = parseInt(durationMatch[1], 10);
+                const mins = parseInt(durationMatch[2], 10);
+                const secs = parseInt(durationMatch[3], 10);
+                const totalMinutes = hours * 60 + mins + Math.round(secs / 60);
+                titleDurations[lastReportedTitle] = totalMinutes;
+                scannedTitlesCount++;
+
+                // Kill process once we have all title durations - HandBrakeCLI hangs on post-processing
+                if (totalTitles > 0 && scannedTitlesCount >= totalTitles) {
+                    resolved = true;
+                    process.stdout.write('\r' + ' '.repeat(50) + '\r');
+                    handbrakeProcess.kill('SIGTERM');
+                    resolve({ code: 0, output, titleDurations, totalTitles });
+                }
+            }
+        };
+
+        handbrakeProcess.stdout.on('data', processData);
+        handbrakeProcess.stderr.on('data', processData);
+
+        handbrakeProcess.on('error', (error) => {
+            if (!resolved) {
+                reject(new Error(`HandBrakeCLI failed to start: ${error.message}`));
+            }
+        });
+
+        handbrakeProcess.on('close', (code) => {
+            if (!resolved) {
+                // Clear the scanning line
+                process.stdout.write('\r' + ' '.repeat(50) + '\r');
+                resolve({ code, output, titleDurations, totalTitles });
+            }
+        });
     });
-    
-    const output = (result.stdout || '') + (result.stderr || '');
-    
-    if (options.verbose) {
-        console.log(output);
-    }
-    
-    if (result.status === 0 || output.includes('scan: DVD has')) {
+
+    const { code, output, titleDurations, totalTitles } = scanResult;
+
+    if (code === 0 || output.includes('scan: DVD has')) {
         const match = output.match(/scan: DVD has (\d+) title/);
         if (match) {
             const numTitles = parseInt(match[1], 10);
             console.log(`✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
             console.log('');
 
-            // Parse title durations from HandBrakeCLI output
-            const titleDurations = {};
-            const titleMatches = output.matchAll(/\+ title (\d+):[\s\S]*?\+ duration: (\d{2}):(\d{2}):(\d{2})/g);
-            for (const titleMatch of titleMatches) {
-                const titleNum = parseInt(titleMatch[1], 10);
-                const hours = parseInt(titleMatch[2], 10);
-                const mins = parseInt(titleMatch[3], 10);
-                const secs = parseInt(titleMatch[4], 10);
-                const totalMinutes = hours * 60 + mins + Math.round(secs / 60);
-                titleDurations[titleNum] = totalMinutes;
-            }
-            
+            // Use durations collected during scanning (we kill process early before final output)
+            const finalDurations = { ...titleDurations };
+
             // Store globally for use during ripping
-            global.dvdTitleDurations = titleDurations;
+            global.dvdTitleDurations = finalDurations;
 
             // Display track duration summary
             console.log('📋 Track Summary:');
-            const sortedTracks = Object.entries(titleDurations).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+            const sortedTracks = Object.entries(finalDurations).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
             sortedTracks.forEach(([track, duration]) => {
                 let category = '';
                 if (duration < 5) {
@@ -1251,16 +1510,16 @@ async function getNumberOfTitles() {
             console.log('');
 
             // Cache the title information with volume name and durations
-            fs.writeFileSync(cacheFilePath, JSON.stringify({ 
-                volumeName, 
+            fs.writeFileSync(cacheFilePath, JSON.stringify({
+                volumeName,
                 numTitles,
-                titleDurations,
+                titleDurations: finalDurations,
                 scannedAt: new Date().toISOString()
             }, null, 2));
-            
+
             if (options.verbose) {
                 console.log(`Cache created with Volume Name: ${volumeName}, Titles: ${numTitles}`);
-                console.log(`Title durations:`, titleDurations);
+                console.log(`Title durations:`, finalDurations);
             }
             return numTitles;
         } else {
@@ -1269,7 +1528,7 @@ async function getNumberOfTitles() {
             return 0;
         }
     } else {
-        throw new Error(`HandBrakeCLI process exited with code ${result.status}`);
+        throw new Error(`HandBrakeCLI process exited with code ${code}`);
     }
 }
 
@@ -1633,7 +1892,48 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
     }
     
     console.log('');
-    
+
+    // Check if using sequential mapping (user selected fallback - needs manual review)
+    const usingSequentialFallback = proposedMappings.some(m => m.aiReasoning && m.aiReasoning.includes('Sequential mapping'));
+
+    // Auto-accept if --yes flag is used AND using AI mapping (not sequential fallback)
+    if (options.autoAccept) {
+        if (usingSequentialFallback) {
+            console.log('  ⚠️  Cannot auto-accept: Using sequential mapping (requires manual review)');
+            console.log('  ⚠️  Sequential mapping may assign tracks to wrong episodes.');
+            console.log('  ⚠️  Please review and adjust mappings before proceeding.\n');
+            // Fall through to manual review
+        } else if (hasAI) {
+            console.log('  ✓ Auto-accepting AI mapping (--yes flag)\n');
+
+            // Save plan if in plan-only mode
+            if (options.planOnly) {
+                await savePlan(proposedMappings, metadata, volumeName, baseFileName);
+                console.log('\n  ✓ Plan saved!\n');
+                return null;
+            }
+
+            // Finalize mappings
+            for (const mapping of proposedMappings) {
+                if (mapping.status === 'pending') {
+                    mapping.status = mapping.proposedName;
+                }
+            }
+            return proposedMappings;
+        } else {
+            // No AI but also not sequential fallback (e.g., movies) - auto-accept is fine
+            console.log('  ✓ Auto-accepting mapping (--yes flag)\n');
+
+            // Finalize mappings
+            for (const mapping of proposedMappings) {
+                if (mapping.status === 'pending') {
+                    mapping.status = mapping.proposedName;
+                }
+            }
+            return proposedMappings;
+        }
+    }
+
     // Main menu loop
     while (true) {
         const mainMenu = new Select({
@@ -1645,7 +1945,7 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
                 'Cancel'
             ]
         });
-        
+
         try {
             const choice = await mainMenu.run();
             
@@ -2237,10 +2537,91 @@ async function ripAllTracks() {
             // Try AI-powered track mapping if available
             const config = loadConfig();
             let aiMappingResult = null;
+            let useSequentialMapping = false;
+
             if (config.openaiApiKey && global.dvdTitleDurations && metadata.type === 'tv') {
-                aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata);
+                // Collect lsdvd metadata for additional context (Option C)
+                const lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
+                if (options.verbose && lsdvdMetadata) {
+                    console.log('[lsdvd] Extended metadata collected');
+                }
+
+                // Attempt AI mapping with retry loop on failure
+                let retryAttempt = 0;
+                while (!aiMappingResult && !useSequentialMapping) {
+                    aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata);
+
+                    if (!aiMappingResult) {
+                        log('ERROR: AI mapping failed');
+                        console.log('');
+                        console.log('  ❌ AI mapping failed!');
+                        console.log('');
+
+                        // Ask user what to do
+                        const failureMenu = new Select({
+                            message: 'How would you like to proceed?',
+                            choices: [
+                                { name: 'Retry AI mapping', value: 'retry' },
+                                { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - NOT RECOMMENDED', value: 'sequential' },
+                                { name: 'Cancel and exit', value: 'cancel' }
+                            ]
+                        });
+
+                        try {
+                            const choice = await failureMenu.run();
+                            if (choice === 'retry') {
+                                retryAttempt++;
+                                console.log(`\n  🔄 Retrying AI mapping (attempt ${retryAttempt + 1})...\n`);
+                                log(`Retrying AI mapping, attempt ${retryAttempt + 1}`);
+                                continue;
+                            } else if (choice === 'sequential') {
+                                console.log('\n  ⚠️  Using sequential mapping - this may produce incorrect results!\n');
+                                log('User chose sequential mapping after AI failure');
+                                useSequentialMapping = true;
+                            } else {
+                                console.log('\n  ✓ Cancelled.\n');
+                                return;
+                            }
+                        } catch (err) {
+                            console.log('\n  ✓ Cancelled.\n');
+                            return;
+                        }
+                    }
+                }
+            } else if (metadata.type === 'tv' && !config.openaiApiKey) {
+                // No AI key configured - warn user and ask what to do
+                console.log('');
+                console.log('  ⚠️  AI mapping not available (no OpenAI API key configured)');
+                console.log('  ⚠️  Without AI, track-to-episode mapping may be incorrect.');
+                console.log('');
+
+                const noAiMenu = new Select({
+                    message: 'How would you like to proceed?',
+                    choices: [
+                        { name: 'Use sequential mapping (Track 1→Ep1, Track 2→Ep2, etc.) - may be incorrect', value: 'sequential' },
+                        { name: 'Cancel and configure AI (run: juiceit --setup)', value: 'cancel' }
+                    ]
+                });
+
+                try {
+                    const choice = await noAiMenu.run();
+                    if (choice === 'sequential') {
+                        console.log('\n  ⚠️  Using sequential mapping...\n');
+                        log('User chose sequential mapping (no AI key)');
+                        useSequentialMapping = true;
+                    } else {
+                        console.log('\n  ℹ️  Run `juiceit --setup` to configure your OpenAI API key.\n');
+                        return;
+                    }
+                } catch (err) {
+                    console.log('\n  ✓ Cancelled.\n');
+                    return;
+                }
+            } else {
+                // Movie or no track durations - sequential is fine
+                useSequentialMapping = true;
             }
-            
+
             // Build proposed mappings with track info before ripping
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
             const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
@@ -2248,7 +2629,7 @@ async function ripAllTracks() {
             let status = 'pending';
             let aiReasoning = null;
             let aiConfidence = null;
-            
+
             // Use AI mapping if available
             if (aiMappingResult && aiMappingResult.mappings) {
                 const aiMapping = aiMappingResult.mappings.find(m => m.trackNum === titleNumber);
@@ -2273,8 +2654,15 @@ async function ripAllTracks() {
                         console.log(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
                     }
                 }
+            } else if (useSequentialMapping) {
+                // User explicitly chose sequential mapping
+                proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+                if (metadata.type === 'tv') {
+                    aiReasoning = '⚠️ Sequential mapping (user selected) - verify track assignments';
+                    aiConfidence = 0;
+                }
             } else {
-                // No AI - use fallback sequential mapping
+                // Shouldn't reach here for TV shows, but fallback just in case
                 proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
             }
             
@@ -2316,7 +2704,15 @@ async function ripAllTracks() {
         console.log('  🎬 Starting rip...');
         console.log('━'.repeat(60));
         console.log('');
-        
+
+        // Log final mapping table before ripping
+        log('=== FINAL TRACK TO FILENAME MAPPINGS ===');
+        for (const mapping of mappingsToRip) {
+            const status = mapping.status === 'skip' ? 'SKIP' : mapping.status;
+            log(`Track ${mapping.trackNum} (${mapping.duration} min) → ${status}`);
+        }
+        log('=== END FINAL MAPPINGS ===');
+
         // Rip only the tracks that weren't marked as skip
         for (const mapping of mappingsToRip) {
             if (mapping.status === 'skip') {
@@ -2412,6 +2808,460 @@ async function ripAllTracks() {
     }
 }
 
+// Diagnostic mode - detailed mapping analysis for debugging
+// Uses shared functions: getVolumeName(), getNumberOfTitles(), lookupMetadata(), aiMapTracks()
+async function runDiagnosticMode() {
+    const config = loadConfig();
+
+    console.log('');
+    console.log('╔' + '═'.repeat(78) + '╗');
+    console.log('║' + '  🔬 JuiceIt Diagnostic Mode - Mapping Analysis'.padEnd(78) + '║');
+    console.log('╚' + '═'.repeat(78) + '╝');
+    console.log('');
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 1: DVD SOURCE INFO
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('📀 SECTION 1: DVD SOURCE INFORMATION');
+
+    if (!options.dvdSource) {
+        options.dvdSource = '/dev/disk4'; // Default
+    }
+    console.log(`  DVD Source: ${options.dvdSource}`);
+
+    // Use shared getVolumeName() function
+    const volumeName = getVolumeName();
+    console.log(`  Volume Name: ${volumeName}`);
+    console.log('');
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 2: DISC SCAN - TRACK INFORMATION
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('🔍 SECTION 2: DISC SCAN - TRACK INFORMATION');
+
+    // Use shared getNumberOfTitles() - this sets global.dvdTitleDurations
+    const numTitles = await getNumberOfTitles();
+    const trackDurations = global.dvdTitleDurations || {};
+
+    console.log('');
+    printTrackAnalysisTable(numTitles, trackDurations);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 3: ONLINE METADATA (TMDB)
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('🌐 SECTION 3: ONLINE METADATA (TMDB)');
+
+    if (!config.tmdbApiKey) {
+        console.log('  ❌ No TMDB API key configured. Run: juiceit --setup');
+        console.log('');
+        return;
+    }
+
+    // Clean volume name for search
+    const cleanName = volumeName.replace(/_/g, ' ').replace(/D1|D2|DISC|DVD/gi, '').trim();
+    console.log(`  Search Query: "${cleanName}"`);
+    console.log('');
+
+    // Fetch movie and TV results using shared searchTMDB function
+    const movieResults = await searchTMDB(cleanName, false);
+    const tvResults = await searchTMDB(cleanName, true);
+
+    console.log(`  TMDB Results: ${movieResults.length} movies, ${tvResults.length} TV shows`);
+    console.log('');
+
+    if (tvResults.length > 0) {
+        console.log('  TV Shows Found:');
+        tvResults.slice(0, 5).forEach((show, i) => {
+            console.log(`    ${i + 1}. ${show.name} (${show.first_air_date?.substring(0, 4) || '?'}) - ID: ${show.id}`);
+        });
+        console.log('');
+    }
+
+    if (movieResults.length > 0) {
+        console.log('  Movies Found:');
+        movieResults.slice(0, 5).forEach((movie, i) => {
+            console.log(`    ${i + 1}. ${movie.title} (${movie.release_date?.substring(0, 4) || '?'}) - ID: ${movie.id}`);
+        });
+        console.log('');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 4: AI TMDB SELECTION
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('🤖 SECTION 4: AI TMDB SELECTION');
+
+    if (!config.openaiApiKey) {
+        console.log('  ❌ No OpenAI API key configured. Run: juiceit --setup');
+        console.log('');
+        return;
+    }
+
+    // Show AI configuration
+    console.log('  ⚙️  AI Configuration:');
+    console.log(`    Model: ${aiConfig.model}`);
+    console.log(`    Temperature: ${aiConfig.temperature}`);
+    console.log(`    Structured Output: ${aiConfig.useStructuredOutput ? 'Yes' : 'No'}`);
+    console.log('');
+
+    // Build and show full prompts
+    const tmdbPrompts = buildTmdbMatchPrompts({
+        volumeName,
+        numTitles,
+        trackDurations,
+        movieResults,
+        tvResults
+    });
+
+    if (aiConfig.diagnosticShowFullPrompts) {
+        console.log('  📤 SYSTEM PROMPT:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(tmdbPrompts.system, '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log('');
+        console.log('  📤 USER PROMPT:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(tmdbPrompts.user, '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log('');
+    }
+
+    // Use shared aiSelectTmdbMatch() function
+    const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults);
+
+    if (!aiSelection) {
+        console.log('  ❌ AI selection failed');
+        console.log('');
+        return;
+    }
+
+    console.log('');
+    if (aiConfig.diagnosticShowFullResponses) {
+        console.log('  📥 FULL AI RESPONSE:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(JSON.stringify(aiSelection, null, 2), '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+    } else {
+        console.log('  📥 AI RESPONSE SUMMARY:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log(`  Selected: ${aiSelection.selectedType.toUpperCase()} - ID ${aiSelection.selectedId}`);
+        console.log(`  Confidence: ${(aiSelection.confidence * 100).toFixed(0)}%`);
+        console.log(`  Reasoning: ${aiSelection.reasoning}`);
+        if (aiSelection.season) {
+            console.log(`  Season: ${aiSelection.season}`);
+        }
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+    }
+    console.log('');
+
+    // Get full metadata from search results + season details
+    let metadata;
+    if (aiSelection.selectedType === 'tv') {
+        const selectedShow = tvResults.find(s => s.id === aiSelection.selectedId);
+        const seasonDetails = await getTVSeasonDetails(aiSelection.selectedId, aiSelection.season || 1);
+        metadata = {
+            type: 'tv',
+            name: selectedShow?.name || 'Unknown',
+            season: aiSelection.season || 1,
+            episodes: seasonDetails?.episodes || []
+        };
+    } else {
+        const selectedMovie = movieResults.find(m => m.id === aiSelection.selectedId);
+        metadata = {
+            type: 'movie',
+            name: selectedMovie?.title || 'Unknown',
+            runtime: selectedMovie?.runtime || null
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 5: EPISODE/CONTENT DETAILS
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('📋 SECTION 5: CONTENT DETAILS FROM TMDB');
+
+    console.log(`  Title: ${metadata.name}`);
+    console.log(`  Type: ${metadata.type}`);
+
+    if (metadata.type === 'tv') {
+        console.log(`  Season: ${metadata.season}`);
+        console.log(`  Episodes: ${metadata.episodes.length}`);
+        console.log('');
+
+        // Use shared analyzeEpisodeRuntimes() function
+        const runtimeAnalysis = analyzeEpisodeRuntimes(metadata.episodes);
+
+        if (runtimeAnalysis) {
+            console.log('  Runtime Analysis (derived from TMDB data):');
+            console.log(`    Range: ${runtimeAnalysis.min}-${runtimeAnalysis.max} min`);
+            console.log(`    Average: ${runtimeAnalysis.avg} min`);
+            console.log(`    Variance: ${runtimeAnalysis.variance} min`);
+            console.log(`    Derived Tolerance: ±${runtimeAnalysis.tolerance} min`);
+            console.log(`    Valid Track Range: ${runtimeAnalysis.min - runtimeAnalysis.tolerance}-${runtimeAnalysis.max + runtimeAnalysis.tolerance} min`);
+            console.log(`    Format: ${runtimeAnalysis.format}`);
+            console.log('');
+        }
+
+        printEpisodeTable(metadata.episodes);
+    } else {
+        console.log(`  Runtime: ${metadata.runtime || '?'} min`);
+        console.log('');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 6: AI TRACK MAPPING
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (metadata.type !== 'tv') {
+        console.log('  ℹ️  AI track mapping only applies to TV shows');
+        console.log('');
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 5.5: EXTENDED DISC METADATA (lsdvd)
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('💿 SECTION 5.5: EXTENDED DISC METADATA (lsdvd)');
+
+    const lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
+
+    if (lsdvdMetadata) {
+        console.log(`  Disc Title: ${lsdvdMetadata.discTitle}`);
+        console.log(`  Disc ID: ${lsdvdMetadata.discId || 'unknown'}`);
+        console.log(`  Longest Track: ${lsdvdMetadata.longestTrack || '?'}`);
+        console.log('');
+        console.log('  Track Details (from lsdvd):');
+        console.log('  ┌───────┬──────────┬──────────┬───────┬──────┐');
+        console.log('  │ Track │ Duration │ Chapters │ Audio │ Subs │');
+        console.log('  ├───────┼──────────┼──────────┼───────┼──────┤');
+
+        const sortedTracks = Object.entries(lsdvdMetadata.tracks)
+            .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+
+        for (const [trackNum, track] of sortedTracks) {
+            const tNum = String(trackNum).padStart(4);
+            const dur = `${track.durationMinutes} min`.padStart(6);
+            const chap = String(track.chapters).padStart(5);
+            const audio = String(track.audioStreams).padStart(3);
+            const subs = String(track.subpictures).padStart(2);
+            console.log(`  │ ${tNum}  │ ${dur}  │   ${chap}  │  ${audio}  │  ${subs}  │`);
+        }
+        console.log('  └───────┴──────────┴──────────┴───────┴──────┘');
+    } else {
+        console.log('  ⚠️  lsdvd not available or failed to read disc');
+        console.log('  ℹ️  Install lsdvd (brew install lsdvd) for extended metadata');
+    }
+    console.log('');
+
+    printDiagnosticSection('🎯 SECTION 6: AI TRACK MAPPING (Option C)');
+
+    console.log('  ℹ️  Using Option C: Raw data + soft guidance (no pre-labeling)');
+    console.log('');
+
+    // Get runtime analysis for soft guidance
+    const runtimeAnalysis = analyzeEpisodeRuntimes(metadata.episodes);
+
+    // Build full prompts from templates (Option C - no CANDIDATE/SKIP pre-labeling)
+    // buildTrackMappingPrompts now handles all formatting internally
+    const mappingPrompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations,
+        runtimeAnalysis,
+        lsdvdMetadata
+    });
+
+    if (aiConfig.diagnosticShowFullPrompts) {
+        console.log('  📤 SYSTEM PROMPT:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(mappingPrompts.system, '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log('');
+        console.log('  📤 USER PROMPT:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(mappingPrompts.user, '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log('');
+    }
+
+    // Use shared aiMapTracks() function with lsdvd metadata
+    const aiMappingResult = await aiMapTracks(trackDurations, metadata, lsdvdMetadata);
+
+    if (!aiMappingResult) {
+        console.log('  ❌ AI mapping failed');
+        console.log('');
+        return;
+    }
+
+    console.log('');
+    if (aiConfig.diagnosticShowFullResponses) {
+        console.log('  📥 FULL AI RESPONSE:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        printIndentedText(JSON.stringify(aiMappingResult, null, 2), '  ');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+    } else {
+        console.log('  📥 AI RESPONSE SUMMARY:');
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+        console.log(`  Tracks Matched: ${aiMappingResult.summary?.tracksMatched || 0}`);
+        console.log(`  Tracks Skipped: ${aiMappingResult.summary?.tracksSkipped || 0}`);
+        console.log(`  Overall Confidence: ${((aiMappingResult.overallConfidence || 0) * 100).toFixed(0)}%`);
+        console.log('  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');
+    }
+    console.log('');
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 7: MAPPING RESULTS TABLE
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('📊 SECTION 7: FINAL MAPPING RESULTS');
+
+    console.log('  Runtime Analysis Used:');
+    console.log(`    Episode Range: ${aiMappingResult.runtimeAnalysis?.episodeRuntimeRange || '?'}`);
+    console.log(`    Tolerance: ±${aiMappingResult.runtimeAnalysis?.toleranceUsed || '?'} min`);
+    console.log(`    Valid Track Range: ${aiMappingResult.runtimeAnalysis?.validTrackRange || '?'}`);
+    console.log('');
+
+    console.log('  Summary:');
+    console.log(`    Tracks Matched: ${aiMappingResult.summary?.tracksMatched || 0}`);
+    console.log(`    Tracks Skipped: ${aiMappingResult.summary?.tracksSkipped || 0}`);
+    console.log(`    Episodes Expected: ${aiMappingResult.summary?.episodesExpected || 0}`);
+    console.log(`    Overall Confidence: ${((aiMappingResult.overallConfidence || 0) * 100).toFixed(0)}%`);
+    console.log('');
+
+    printMappingResultsTable(aiMappingResult.mappings, metadata.episodes);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 8: POTENTIAL ISSUES
+    // ═══════════════════════════════════════════════════════════════════════════
+    printDiagnosticSection('⚠️  SECTION 8: POTENTIAL ISSUES');
+
+    const issues = analyzeMappingIssues(aiMappingResult, metadata);
+
+    if (issues.length === 0) {
+        console.log('  ✅ No issues detected - mapping looks good!');
+    } else {
+        issues.forEach(issue => console.log(`  ${issue}`));
+    }
+    console.log('');
+
+    console.log('╔' + '═'.repeat(78) + '╗');
+    console.log('║' + '  Diagnostic Complete'.padEnd(78) + '║');
+    console.log('╚' + '═'.repeat(78) + '╝');
+    console.log('');
+}
+
+// Helper: Print diagnostic section header
+function printDiagnosticSection(title) {
+    console.log('┌' + '─'.repeat(78) + '┐');
+    console.log('│' + `  ${title}`.padEnd(78) + '│');
+    console.log('└' + '─'.repeat(78) + '┘');
+    console.log('');
+}
+
+// Helper: Print text with indentation (for multi-line prompts/responses)
+function printIndentedText(text, indent = '  ') {
+    if (!text) return;
+    const lines = text.split('\n');
+    lines.forEach(line => {
+        console.log(indent + line);
+    });
+}
+
+// Helper: Print track table (just facts - no analysis until we have TMDB data)
+function printTrackAnalysisTable(numTitles, trackDurations) {
+    console.log('  ┌─────────┬──────────┐');
+    console.log('  │  Track  │ Duration │');
+    console.log('  ├─────────┼──────────┤');
+
+    for (let i = 1; i <= numTitles; i++) {
+        const duration = trackDurations[i] || 0;
+        const trackStr = String(i).padStart(4);
+        const durationStr = duration > 0 ? `${duration} min`.padStart(6) : '  —   ';
+        console.log(`  │  ${trackStr}   │ ${durationStr}  │`);
+    }
+    console.log('  └─────────┴──────────┘');
+    console.log('');
+}
+
+// Helper: Print episode table
+function printEpisodeTable(episodes) {
+    console.log('  Episode List:');
+    console.log('  ┌─────┬─────────┬─────────────────────────────────────────────────┐');
+    console.log('  │ Ep# │ Runtime │ Title                                           │');
+    console.log('  ├─────┼─────────┼─────────────────────────────────────────────────┤');
+    episodes.forEach(ep => {
+        const epNum = String(ep.episode_number).padStart(2);
+        const runtime = ep.runtime ? `${ep.runtime} min`.padStart(6) : '  ? min';
+        const title = (ep.name || 'Unknown').substring(0, 47).padEnd(47);
+        console.log(`  │  ${epNum} │ ${runtime} │ ${title} │`);
+    });
+    console.log('  └─────┴─────────┴─────────────────────────────────────────────────┘');
+    console.log('');
+}
+
+// Helper: Print mapping results table
+function printMappingResultsTable(mappings, episodes) {
+    console.log('  Detailed Mapping Table:');
+    console.log('  ┌───────┬──────────┬────────┬─────────────────┬──────┬────────────────────────────────┐');
+    console.log('  │ Track │ Duration │ Action │ Episode         │ Conf │ Reasoning                      │');
+    console.log('  ├───────┼──────────┼────────┼─────────────────┼──────┼────────────────────────────────┤');
+
+    for (const m of mappings) {
+        const trackStr = String(m.trackNum).padStart(4);
+        const durationStr = `${m.trackDuration} min`.padStart(6);
+
+        let action, episode;
+        if (m.shouldSkip) {
+            action = '⏭ SKIP';
+            episode = '—'.padEnd(15);
+        } else {
+            action = '✓ MAP ';
+            const epIndex = m.episodeIndex;
+            const epName = episodes[epIndex]?.name || 'Unknown';
+            episode = `E${epIndex + 1}: ${epName}`.substring(0, 15).padEnd(15);
+        }
+
+        const conf = `${(m.confidence * 100).toFixed(0)}%`.padStart(4);
+        const reason = (m.reasoning || '').substring(0, 30).padEnd(30);
+
+        console.log(`  │ ${trackStr}  │ ${durationStr}  │ ${action} │ ${episode} │ ${conf} │ ${reason} │`);
+    }
+    console.log('  └───────┴──────────┴────────┴─────────────────┴──────┴────────────────────────────────┘');
+    console.log('');
+}
+
+// Helper: Analyze mapping for potential issues
+function analyzeMappingIssues(aiMappingResult, metadata) {
+    const issues = [];
+
+    // Check for episode count mismatch
+    const mappedCount = aiMappingResult.mappings.filter(m => !m.shouldSkip).length;
+    const expectedCount = metadata.episodes.length;
+    if (mappedCount !== expectedCount) {
+        issues.push(`⚠️  Episode count mismatch: ${mappedCount} tracks mapped vs ${expectedCount} episodes expected`);
+    }
+
+    // Check for low confidence mappings
+    const lowConfidence = aiMappingResult.mappings.filter(m => !m.shouldSkip && m.confidence < 0.7);
+    if (lowConfidence.length > 0) {
+        issues.push(`⚠️  ${lowConfidence.length} mapping(s) have low confidence (<70%)`);
+        lowConfidence.forEach(m => {
+            issues.push(`     - Track ${m.trackNum}: ${(m.confidence * 100).toFixed(0)}% confidence`);
+        });
+    }
+
+    // Check for duration mismatches
+    const durationMismatches = aiMappingResult.mappings.filter(m => {
+        if (m.shouldSkip || m.episodeIndex === null) return false;
+        const epRuntime = metadata.episodes[m.episodeIndex]?.runtime || 0;
+        return Math.abs(m.trackDuration - epRuntime) > 3;
+    });
+    if (durationMismatches.length > 0) {
+        issues.push(`⚠️  ${durationMismatches.length} track(s) have >3 min duration difference from episode:`);
+        durationMismatches.forEach(m => {
+            const epRuntime = metadata.episodes[m.episodeIndex]?.runtime || '?';
+            issues.push(`     - Track ${m.trackNum} (${m.trackDuration} min) → Episode ${m.episodeIndex + 1} (${epRuntime} min)`);
+        });
+    }
+
+    return issues;
+}
+
 // Show help function
 function showHelp() {
     console.log(`
@@ -2429,6 +3279,7 @@ Options:
   --plan            Create a rip plan and exit (don't rip yet)
   --rename-only     Only rename existing files using metadata (no ripping)
   --scan-only       Scan disc and show metadata without ripping
+  --diagnose        Run diagnostic mode - detailed mapping analysis for debugging
   --subtitles       Specify the subtitle track number (default: 1)
   --sub-lang        Specify the subtitle language code (default: eng)
   --verbose         Show detailed technical output

@@ -1,13 +1,18 @@
-.PHONY: help test demo install reinstall release
+.PHONY: help test test-core test-prompts test-runtime test-openai demo install reinstall release diagnose
 
 help:
 	@echo "JuiceIt Development Commands"
 	@echo ""
-	@echo "  make install    - Install npm dependencies"
-	@echo "  make test       - Run automated tests"
-	@echo "  make demo       - Run interactive mapping demo"
-	@echo "  make reinstall  - Reinstall in Homebrew for local testing"
-	@echo "  make release    - Create a new release (see RELEASE.md)"
+	@echo "  make install       - Install npm dependencies"
+	@echo "  make test          - Run all automated tests"
+	@echo "  make test-core     - Run core functionality tests only"
+	@echo "  make test-prompts  - Run prompt/schema tests only"
+	@echo "  make test-runtime  - Run runtime analysis tests only"
+	@echo "  make test-openai   - Run OpenAI API integration tests only"
+	@echo "  make demo          - Run interactive mapping demo"
+	@echo "  make diagnose      - Run diagnostic mode (analyze disc and mapping)"
+	@echo "  make reinstall     - Reinstall in Homebrew for local testing"
+	@echo "  make release       - Create a new release (see RELEASE.md)"
 	@echo ""
 	@echo "Local Testing Workflow:"
 	@echo "  1. Edit code"
@@ -23,8 +28,24 @@ install:
 test:
 	npm test
 
+test-core:
+	npm run test:core
+
+test-prompts:
+	npm run test:prompts
+
+test-runtime:
+	npm run test:runtime
+
+test-openai:
+	npm run test:openai
+
 demo:
 	npm run demo
+
+diagnose:
+	@echo "Running diagnostic mode..."
+	@node juiceit.js --diagnose
 
 reinstall:
 	@echo "Reinstalling in Homebrew for testing..."

@@ -34,6 +34,7 @@ brew install juiceit
 - [HandBrakeCLI](https://handbrake.fr/) - `brew install handbrake`
 - [libdvdcss](https://www.videolan.org/developers/libdvdcss/) - `brew install libdvdcss`
 - [ffmpeg](https://ffmpeg.org/) - `brew install ffmpeg`
+- [lsdvd](http://sourceforge.net/projects/lsdvd/) - `brew install lsdvd` - Extended disc metadata for AI mapping
 
 ```bash
 git clone https://github.com/brian-slate/juice-it.git

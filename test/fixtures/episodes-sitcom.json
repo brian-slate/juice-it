@@ -1,0 +1,19 @@
+{
+  "description": "Half-hour sitcom like The Office (21-24 min episodes)",
+  "episodes": [
+    { "episode_number": 1, "name": "Pilot", "runtime": 23 },
+    { "episode_number": 2, "name": "Diversity Day", "runtime": 22 },
+    { "episode_number": 3, "name": "Health Care", "runtime": 22 },
+    { "episode_number": 4, "name": "The Alliance", "runtime": 22 },
+    { "episode_number": 5, "name": "Basketball", "runtime": 23 },
+    { "episode_number": 6, "name": "Hot Girl", "runtime": 21 }
+  ],
+  "expected": {
+    "min": 21,
+    "max": 23,
+    "avg": 22,
+    "variance": 2,
+    "tolerance": 2,
+    "format": "half-hour format (sitcom, animation, etc.)"
+  }
+}

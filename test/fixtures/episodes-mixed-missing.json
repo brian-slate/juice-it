@@ -1,0 +1,18 @@
+{
+  "description": "Episodes with some missing runtime data",
+  "episodes": [
+    { "episode_number": 1, "name": "Episode 1", "runtime": 30 },
+    { "episode_number": 2, "name": "Episode 2", "runtime": null },
+    { "episode_number": 3, "name": "Episode 3", "runtime": 0 },
+    { "episode_number": 4, "name": "Episode 4", "runtime": 32 },
+    { "episode_number": 5, "name": "Episode 5", "runtime": 28 }
+  ],
+  "expected": {
+    "min": 28,
+    "max": 32,
+    "avg": 30,
+    "variance": 4,
+    "tolerance": 3,
+    "format": "half-hour format (sitcom, animation, etc.)"
+  }
+}
