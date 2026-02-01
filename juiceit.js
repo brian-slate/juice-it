@@ -654,18 +654,22 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
     const config = loadConfig();
     if (config.openaiApiKey && trackDurations) {
         const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults);
-        
-        if (aiSelection && aiSelection.selectedId && aiSelection.confidence >= 0.8) {
-            // AI is confident - use its selection
-            const selectedResult = aiSelection.selectedType === 'tv' 
+
+        if (aiSelection && aiSelection.selectedId) {
+            const selectedResult = aiSelection.selectedType === 'tv'
                 ? tvResults.find(s => s.id === aiSelection.selectedId)
                 : movieResults.find(m => m.id === aiSelection.selectedId);
-            
-            if (selectedResult) {
+
+            // In automatic mode (default): use AI selection regardless of confidence
+            // In interactive mode: only auto-select if confidence >= 0.8
+            const shouldAutoSelect = !options.interactive || aiSelection.confidence >= 0.8;
+
+            if (selectedResult && shouldAutoSelect) {
+                const confidenceStr = aiSelection.confidence >= 0.8 ? '' : ` (${(aiSelection.confidence * 100).toFixed(0)}% confidence)`;
                 if (aiSelection.selectedType === 'tv') {
                     const season = aiSelection.season || 1;
                     const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
-                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}`);
+                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}${confidenceStr}`);
                     return {
                         type: 'tv',
                         name: selectedResult.name,
@@ -674,7 +678,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                         aiSelected: true
                     };
                 } else {
-                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.title}`);
+                    console.log(`\n   ✨ AI auto-selected: ${selectedResult.title}${confidenceStr}`);
                     return {
                         type: 'movie',
                         name: selectedResult.title,
@@ -682,9 +686,35 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                         aiSelected: true
                     };
                 }
+            } else if (options.interactive && aiSelection.confidence < 0.8) {
+                console.log(`\n   ℹ️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%), showing manual selection...`);
             }
-        } else if (aiSelection) {
-            console.log(`\n   ℹ️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%), showing manual selection...`);
+        }
+    }
+
+    // In automatic mode without AI: use first result or disc name
+    if (!options.interactive) {
+        if (mediaType === 'tv' && tvResults.length > 0) {
+            const show = tvResults[0];
+            const seasonDetails = await getTVSeasonDetails(show.id, 1);
+            console.log(`\n   📺 Auto-selected: ${show.name} - Season 1`);
+            return {
+                type: 'tv',
+                name: show.name,
+                season: 1,
+                episodes: seasonDetails ? seasonDetails.episodes : null
+            };
+        } else if (movieResults.length > 0) {
+            const movie = movieResults[0];
+            console.log(`\n   🎬 Auto-selected: ${movie.title}`);
+            return {
+                type: 'movie',
+                name: movie.title,
+                year: movie.release_date ? movie.release_date.split('-')[0] : null
+            };
+        } else {
+            console.log(`\n   📀 Using disc name: ${volumeName}`);
+            return { type: 'disc', volumeName };
         }
     }
     
@@ -886,8 +916,8 @@ args.forEach((arg, index) => {
         options.runSetup = true; // Run API key setup
     } else if (arg === '--plan') {
         options.planOnly = true; // Only create a plan, don't rip
-    } else if (arg === '--yes' || arg === '-y') {
-        options.autoAccept = true; // Auto-accept AI mapping without prompts
+    } else if (arg === '--interactive' || arg === '-i') {
+        options.interactive = true; // Enable interactive mode for manual review/selection
     } else if (arg === '--diagnose') {
         options.diagnose = true; // Run diagnostic mode - detailed mapping analysis
     }
@@ -1896,42 +1926,36 @@ async function reviewAndMapEpisodesBeforeRip(proposedMappings, metadata, volumeN
     // Check if using sequential mapping (user selected fallback - needs manual review)
     const usingSequentialFallback = proposedMappings.some(m => m.aiReasoning && m.aiReasoning.includes('Sequential mapping'));
 
-    // Auto-accept if --yes flag is used AND using AI mapping (not sequential fallback)
-    if (options.autoAccept) {
-        if (usingSequentialFallback) {
-            console.log('  ⚠️  Cannot auto-accept: Using sequential mapping (requires manual review)');
-            console.log('  ⚠️  Sequential mapping may assign tracks to wrong episodes.');
-            console.log('  ⚠️  Please review and adjust mappings before proceeding.\n');
-            // Fall through to manual review
-        } else if (hasAI) {
-            console.log('  ✓ Auto-accepting AI mapping (--yes flag)\n');
-
-            // Save plan if in plan-only mode
-            if (options.planOnly) {
-                await savePlan(proposedMappings, metadata, volumeName, baseFileName);
-                console.log('\n  ✓ Plan saved!\n');
-                return null;
-            }
-
-            // Finalize mappings
-            for (const mapping of proposedMappings) {
-                if (mapping.status === 'pending') {
-                    mapping.status = mapping.proposedName;
-                }
-            }
-            return proposedMappings;
+    // Default behavior: auto-accept AI mapping (unless --interactive flag is set)
+    // Sequential fallback always requires interactive review
+    if (!options.interactive && !usingSequentialFallback) {
+        if (hasAI) {
+            console.log('  ✓ Auto-accepting AI mapping\n');
         } else {
-            // No AI but also not sequential fallback (e.g., movies) - auto-accept is fine
-            console.log('  ✓ Auto-accepting mapping (--yes flag)\n');
-
-            // Finalize mappings
-            for (const mapping of proposedMappings) {
-                if (mapping.status === 'pending') {
-                    mapping.status = mapping.proposedName;
-                }
-            }
-            return proposedMappings;
+            console.log('  ✓ Auto-accepting mapping\n');
         }
+
+        // Save plan if in plan-only mode
+        if (options.planOnly) {
+            await savePlan(proposedMappings, metadata, volumeName, baseFileName);
+            console.log('\n  ✓ Plan saved!\n');
+            return null;
+        }
+
+        // Finalize mappings
+        for (const mapping of proposedMappings) {
+            if (mapping.status === 'pending') {
+                mapping.status = mapping.proposedName;
+            }
+        }
+        return proposedMappings;
+    }
+
+    // Interactive mode or sequential fallback - show review menu
+    if (usingSequentialFallback) {
+        console.log('  ⚠️  Using sequential mapping (AI not available or failed)');
+        console.log('  ⚠️  Sequential mapping may assign tracks to wrong episodes.');
+        console.log('  ⚠️  Please review and adjust mappings before proceeding.\n');
     }
 
     // Main menu loop
@@ -3283,6 +3307,8 @@ Options:
   --subtitles       Specify the subtitle track number (default: 1)
   --sub-lang        Specify the subtitle language code (default: eng)
   --verbose         Show detailed technical output
+  --interactive, -i Enable interactive mode for manual review and selection
+                    (default: fully automatic with AI-powered decisions)
 
 Example:
   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
