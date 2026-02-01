@@ -123,9 +123,7 @@ async function searchTMDB(query, isTV = false) {
         });
         return response.data.results || [];
     } catch (error) {
-        if (options.verbose) {
-            console.log(`Error searching TMDB: ${error.message}`);
-        }
+        logger.debug(`Error searching TMDB: ${error.message}`);
         return [];
     }
 }
@@ -140,9 +138,7 @@ async function getTVSeasonDetails(tvId, seasonNumber) {
         });
         return response.data;
     } catch (error) {
-        if (options.verbose) {
-            console.log(`Error fetching season details: ${error.message}`);
-        }
+        logger.debug(`Error fetching season details: ${error.message}`);
         return null;
     }
 }
@@ -193,23 +189,19 @@ async function callOpenAI(systemMessage, userMessage, opts = {}) {
     try {
         const config = loadConfig();
         if (!config.openaiApiKey) {
-            if (options.verbose) {
-                console.log('\n[AI] No OpenAI key configured, skipping AI call');
-            }
+            logger.debug('[AI] No OpenAI key configured, skipping AI call');
             return null;
         }
 
         // Use structured output if schema provided and config allows
         const useStructured = schema && schemaName && aiConfig.useStructuredOutput;
 
-        if (options.verbose) {
-            console.log('\n[AI] Calling OpenAI API...');
-            console.log(`[AI] Model: ${aiConfig.model}`);
-            console.log(`[AI] Temperature: ${aiConfig.temperature}`);
-            console.log('[AI] Structured output:', useStructured ? 'Yes (Zod schema)' : 'No (JSON mode)');
-            console.log('[AI] System message:', systemMessage.substring(0, 100) + '...');
-            console.log('[AI] User message length:', userMessage.length, 'chars');
-        }
+        logger.debug('[AI] Calling OpenAI API...');
+        logger.debug(`[AI] Model: ${aiConfig.model}`);
+        logger.debug(`[AI] Temperature: ${aiConfig.temperature}`);
+        logger.debug(`[AI] Structured output: ${useStructured ? 'Yes (Zod schema)' : 'No (JSON mode)'}`);
+        logger.debug(`[AI] System message: ${systemMessage.substring(0, 100)}...`);
+        logger.debug(`[AI] User message length: ${userMessage.length} chars`);
         log(`AI: Calling OpenAI API with ${aiConfig.model}`);
         log(`AI: Temperature: ${aiConfig.temperature}`);
         log(`AI: Structured output: ${useStructured ? 'Yes (Zod schema)' : 'No (JSON mode)'}`);
@@ -257,9 +249,7 @@ async function callOpenAI(systemMessage, userMessage, opts = {}) {
                 // Handle refusals
                 if (response.choices[0].message.refusal) {
                     log(`AI: Refusal: ${response.choices[0].message.refusal}`);
-                    if (options.verbose) {
-                        console.log(`[AI] Refusal: ${response.choices[0].message.refusal}`);
-                    }
+                    logger.debug(`[AI] Refusal: ${response.choices[0].message.refusal}`);
                     return null;
                 }
 
@@ -289,20 +279,16 @@ async function callOpenAI(systemMessage, userMessage, opts = {}) {
 
         const elapsed = Date.now() - startTime;
 
-        if (options.verbose) {
-            console.log(`[AI] Response received in ${elapsed}ms`);
-            console.log('[AI] Tokens used:', tokenUsage.total_tokens);
-            console.log('[AI] Response:', JSON.stringify(result, null, 2));
-        }
+        logger.debug(`[AI] Response received in ${elapsed}ms`);
+        logger.debug(`[AI] Tokens used: ${tokenUsage.total_tokens}`);
+        logger.debug(`[AI] Response: ${JSON.stringify(result, null, 2)}`);
         log(`AI: Response received in ${elapsed}ms`);
         log(`AI: Tokens - prompt: ${tokenUsage.prompt_tokens}, completion: ${tokenUsage.completion_tokens}, total: ${tokenUsage.total_tokens}`);
         log(`AI: Response: ${JSON.stringify(result)}`);
 
         return result;
     } catch (error) {
-        if (options.verbose) {
-            console.log(`\n[AI] Error: ${error.message}`);
-        }
+        logger.debug(`[AI] Error: ${error.message}`);
         log(`AI API error: ${error.message}`);
         return null;
     }
@@ -314,12 +300,10 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
         if (!options.diagnose) {
             console.log('\n🤖 Using AI to analyze disc and select best match...');
         }
-        if (options.verbose) {
-            console.log('[AI] Starting TMDB match selection');
-            console.log('[AI] Analyzing:', volumeName, 'with', numTitles, 'tracks');
-            console.log('[AI] Track durations:', JSON.stringify(trackDurations));
-            console.log('[AI] TMDB results: ', movieResults.length, 'movies,', tvResults.length, 'TV shows');
-        }
+        logger.debug('[AI] Starting TMDB match selection');
+        logger.debug(`[AI] Analyzing: ${volumeName} with ${numTitles} tracks`);
+        logger.debug(`[AI] Track durations: ${JSON.stringify(trackDurations)}`);
+        logger.debug(`[AI] TMDB results: ${movieResults.length} movies, ${tvResults.length} TV shows`);
         log('AI: Starting TMDB match selection');
         log(`AI: Disc - ${volumeName} with ${numTitles} tracks`);
         log(`AI: Track durations - ${JSON.stringify(trackDurations)}`);
@@ -343,20 +327,16 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
         if (result && result.selectedId) {
             console.log(`   ✓ AI selected: ${result.selectedType === 'tv' ? 'TV' : 'Movie'} (confidence: ${(result.confidence * 100).toFixed(0)}%)`);
             console.log(`   Reasoning: ${result.reasoning}`);
-            if (options.verbose) {
-                console.log('[AI] Selected ID:', result.selectedId);
-                console.log('[AI] Season:', result.season || 'N/A');
-            }
+            logger.debug(`[AI] Selected ID: ${result.selectedId}`);
+            logger.debug(`[AI] Season: ${result.season || 'N/A'}`);
             log(`AI TMDB selection: ${JSON.stringify(result)}`);
-        } else if (options.verbose) {
-            console.log('[AI] No match selected or low confidence');
+        } else {
+            logger.debug('[AI] No match selected or low confidence');
         }
 
         return result;
     } catch (error) {
-        if (options.verbose) {
-            console.log(`\nAI selection error: ${error.message}`);
-        }
+        logger.debug(`AI selection error: ${error.message}`);
         return null;
     }
 }
@@ -421,13 +401,11 @@ function analyzeEpisodeRuntimes(episodes) {
 async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
     try {
         console.log('\n🤖 Using AI to map tracks to episodes...');
-        if (options.verbose) {
-            console.log('[AI] Starting track mapping (Option C: raw data + soft guidance)');
-            console.log('[AI] Track count:', Object.keys(trackDurations).length);
-            console.log('[AI] Content type:', metadata.type);
-            console.log('[AI] Episodes available:', metadata.episodes ? metadata.episodes.length : 'N/A');
-            console.log('[AI] lsdvd metadata:', lsdvdMetadata ? 'available' : 'not available');
-        }
+        logger.debug('[AI] Starting track mapping (Option C: raw data + soft guidance)');
+        logger.debug(`[AI] Track count: ${Object.keys(trackDurations).length}`);
+        logger.debug(`[AI] Content type: ${metadata.type}`);
+        logger.debug(`[AI] Episodes available: ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
+        logger.debug(`[AI] lsdvd metadata: ${lsdvdMetadata ? 'available' : 'not available'}`);
         log('AI: Starting track mapping (Option C)');
         log(`AI: Track count - ${Object.keys(trackDurations).length}`);
         log(`AI: Content type - ${metadata.type}`);
@@ -466,9 +444,7 @@ async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
                 const episodeName = !m.shouldSkip && m.episodeIndex !== null && episodes[m.episodeIndex]
                     ? ` (${episodes[m.episodeIndex].name})` : '';
                 log(`AI: Track ${m.trackNum} (${m.trackDuration} min) → ${action}${episodeName} [${(m.confidence * 100).toFixed(0)}%] - ${m.reasoning}`);
-                if (options.verbose) {
-                    console.log(`[AI]   Track ${m.trackNum}: ${action}${episodeName} (${(m.confidence * 100).toFixed(0)}% - ${m.reasoning})`);
-                }
+                logger.debug(`[AI]   Track ${m.trackNum}: ${action}${episodeName} (${(m.confidence * 100).toFixed(0)}% - ${m.reasoning})`);
             });
             log('AI: === END MAPPING RESULTS ===');
             log(`AI track mapping full response: ${JSON.stringify(result)}`);
@@ -481,9 +457,7 @@ async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
             return null;
         }
     } catch (error) {
-        if (options.verbose) {
-            console.log(`\nAI mapping error: ${error.message}`);
-        }
+        logger.debug(`AI mapping error: ${error.message}`);
         return null;
     }
 }
@@ -962,20 +936,14 @@ function cleanupOldCacheFiles(cacheDir, maxFiles = 10) {
             filesToDelete.forEach(file => {
                 try {
                     fs.unlinkSync(file.path);
-                    if (options.verbose) {
-                        console.log(`Cleaned up old cache: ${file.name}`);
-                    }
+                    logger.debug(`Cleaned up old cache: ${file.name}`);
                 } catch (err) {
-                    if (options.verbose) {
-                        console.log(`Could not delete cache file ${file.name}: ${err.message}`);
-                    }
+                    logger.debug(`Could not delete cache file ${file.name}: ${err.message}`);
                 }
             });
         }
     } catch (error) {
-        if (options.verbose) {
-            console.log(`Error cleaning up cache: ${error.message}`);
-        }
+        logger.debug(`Error cleaning up cache: ${error.message}`);
     }
 }
 
@@ -1044,9 +1012,7 @@ function checkLsdvd() {
  */
 function getLsdvdMetadata(dvdSource) {
     if (!checkLsdvd()) {
-        if (options.verbose) {
-            console.log('[lsdvd] Not installed, skipping extended metadata');
-        }
+        logger.debug('[lsdvd] Not installed, skipping extended metadata');
         return null;
     }
 
@@ -1057,18 +1023,14 @@ function getLsdvdMetadata(dvdSource) {
         });
 
         if (result.error || result.status !== 0) {
-            if (options.verbose) {
-                console.log('[lsdvd] Failed to read disc:', result.stderr || result.error?.message);
-            }
+            logger.debug(`[lsdvd] Failed to read disc: ${result.stderr || result.error?.message}`);
             return null;
         }
 
         const output = result.stdout + result.stderr; // lsdvd outputs to both
         return parseLsdvdOutput(output);
     } catch (error) {
-        if (options.verbose) {
-            console.log('[lsdvd] Error:', error.message);
-        }
+        logger.debug(`[lsdvd] Error: ${error.message}`);
         return null;
     }
 }
@@ -1191,9 +1153,7 @@ function detectAllDvdDrives() {
         
         return drives;
     } catch (error) {
-        if (options.verbose) {
-            logger.error("Error detecting DVD drives:", error);
-        }
+        logger.debug(`Error detecting DVD drives: ${error.message}`);
         return [];
     }
 }
@@ -1358,10 +1318,8 @@ function ripDvd(titleNumber, outputFileName, trackNum, totalTracks, onProgress) 
         // Log the HandBrakeCLI command
         log(`Starting track ${titleNumber}: ${outputFileName}`);
         log(`Command: HandBrakeCLI ${args.join(' ')}`);
-        
-        if (options.verbose) {
-            console.log(`⚙️ Running HandBrakeCLI with command: HandBrakeCLI ${args.join(' ')}`);
-        }
+
+        logger.debug(`Running HandBrakeCLI with command: HandBrakeCLI ${args.join(' ')}`);
 
         const startTime = Date.now();
         const handbrakeProcess = spawn('HandBrakeCLI', args);
@@ -1388,9 +1346,7 @@ function ripDvd(titleNumber, outputFileName, trackNum, totalTracks, onProgress) 
             const dataStr = data.toString();
             errorOutput += dataStr;
             log(`[stderr] ${dataStr.trim()}`);
-            if (options.verbose) {
-                console.log(`\n[handbrake-info]: ${dataStr}`);
-            }
+            logger.debug(`[handbrake-info]: ${dataStr.trim()}`);
         });
 
         handbrakeProcess.on('close', (code) => {
@@ -1424,19 +1380,15 @@ async function getNumberOfTitles() {
     const volumeName = getVolumeName(); // Get the current volume name
     const cacheFilePath = getCacheFilePath();
 
-    if (options.verbose) {
-        console.log(`\nCurrent Volume Name: ${volumeName}`);
-        console.log(`Cache file path: ${cacheFilePath}`);
-    }
+    logger.debug(`Current Volume Name: ${volumeName}`);
+    logger.debug(`Cache file path: ${cacheFilePath}`);
 
     // Check if cache exists
     if (fs.existsSync(cacheFilePath)) {
         const cacheData = JSON.parse(fs.readFileSync(cacheFilePath));
 
-        if (options.verbose) {
-            console.log(`\nCached Volume Name: ${cacheData.volumeName}`);
-            console.log(`Comparing cached volume name "${cacheData.volumeName}" with current volume name "${volumeName}"`);
-        }
+        logger.debug(`Cached Volume Name: ${cacheData.volumeName}`);
+        logger.debug(`Comparing cached volume name "${cacheData.volumeName}" with current volume name "${volumeName}"`);
 
         if (cacheData.volumeName === volumeName) {
             console.log(` ✓ Found ${cacheData.numTitles} title${cacheData.numTitles > 1 ? 's' : ''} (cached)`);
@@ -1446,11 +1398,11 @@ async function getNumberOfTitles() {
                 global.dvdTitleDurations = cacheData.titleDurations;
             }
             return cacheData.numTitles;
-        } else if (options.verbose) {
-            console.log("Volume names do not match. Cache will be ignored.");
+        } else {
+            logger.debug("Volume names do not match. Cache will be ignored.");
         }
-    } else if (options.verbose) {
-        console.log("Cache does not exist. Fetching title information from the disc.");
+    } else {
+        logger.debug("Cache does not exist. Fetching title information from the disc.");
     }
 
     // Fetch title information if cache is not valid
@@ -1460,9 +1412,7 @@ async function getNumberOfTitles() {
     // Use --previews 0:0 to skip preview generation entirely - we only need title/duration info
     const args = ['-i', options.dvdSource, '--title', '0', '--scan', '--previews', '0:0'];
 
-    if (options.verbose) {
-        console.log(`Running: HandBrakeCLI ${args.join(' ')}`);
-    }
+    logger.debug(`Running: HandBrakeCLI ${args.join(' ')}`);
 
     // Use Promise-wrapped spawn for real-time output
     const scanResult = await new Promise((resolve, reject) => {
@@ -1484,7 +1434,7 @@ async function getNumberOfTitles() {
             output += chunk;
 
             if (options.verbose) {
-                process.stdout.write(chunk);
+                process.stdout.write(chunk); // Keep raw output for verbose mode
             }
 
             // Check for total title count
@@ -1581,10 +1531,8 @@ async function getNumberOfTitles() {
                 scannedAt: new Date().toISOString()
             }, null, 2));
 
-            if (options.verbose) {
-                console.log(`Cache created with Volume Name: ${volumeName}, Titles: ${numTitles}`);
-                console.log(`Title durations:`, finalDurations);
-            }
+            logger.debug(`Cache created with Volume Name: ${volumeName}, Titles: ${numTitles}`);
+            logger.debug(`Title durations: ${JSON.stringify(finalDurations)}`);
             return numTitles;
         } else {
             console.log(" ✗ No titles found.");
@@ -1627,9 +1575,7 @@ function getVideoDuration(filePath) {
             return Math.round(seconds / 60); // Return duration in minutes
         }
     } catch (error) {
-        if (options.verbose) {
-            console.log(`Error getting duration for ${filePath}: ${error.message}`);
-        }
+        logger.debug(`Error getting duration for ${filePath}: ${error.message}`);
     }
     return null;
 }
@@ -1690,14 +1636,10 @@ async function renameExistingFiles() {
                 if (cacheData.volumeName === volumeName && cacheData.titleDurations) {
                     dvdTitleDurations = cacheData.titleDurations;
                     console.log(`💿 Using DVD track durations from disc scan\n`);
-                    if (options.verbose) {
-                        console.log('DVD title durations:', dvdTitleDurations);
-                    }
+                    logger.debug(`DVD title durations: ${JSON.stringify(dvdTitleDurations)}`);
                 }
             } catch (error) {
-                if (options.verbose) {
-                    console.log(`Could not load cache: ${error.message}`);
-                }
+                logger.debug(`Could not load cache: ${error.message}`);
             }
         }
         
@@ -2402,9 +2344,7 @@ function loadPlan() {
         log(`Loaded plan from: ${planPath}`);
         return plan;
     } catch (error) {
-        if (options.verbose) {
-            console.log(`Error loading plan: ${error.message}`);
-        }
+        logger.debug(`Error loading plan: ${error.message}`);
         return null;
     }
 }
@@ -2786,9 +2726,7 @@ async function ripAllTracks() {
                     proposedName = '(will skip)';
                     aiReasoning = 'AI did not analyze this track';
                     aiConfidence = null;
-                    if (options.verbose) {
-                        console.log(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
-                    }
+                    logger.debug(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
                 }
             } else if (useSequentialMapping) {
                 // User explicitly chose sequential mapping
