@@ -39,36 +39,41 @@ echo -e "Bump type: ${YELLOW}$BUMP_TYPE${NC}"
 echo ""
 
 # Step 1: Run tests
-echo -e "${GREEN}[1/7] Running tests...${NC}"
+echo -e "${GREEN}[1/8] Running tests...${NC}"
 npm test
 echo ""
 
 # Step 2: Run lint
-echo -e "${GREEN}[2/7] Running lint...${NC}"
+echo -e "${GREEN}[2/8] Running lint...${NC}"
 npm run lint
 echo ""
 
 # Step 3: Bump version
-echo -e "${GREEN}[3/7] Bumping version ($BUMP_TYPE)...${NC}"
+echo -e "${GREEN}[3/8] Bumping version ($BUMP_TYPE)...${NC}"
 npm version $BUMP_TYPE --no-git-tag-version
 NEW_VERSION=$(node -p "require('./package.json').version")
 echo -e "New version: ${YELLOW}v$NEW_VERSION${NC}"
 echo ""
 
 # Step 4: Commit and tag
-echo -e "${GREEN}[4/7] Committing and tagging...${NC}"
+echo -e "${GREEN}[4/8] Committing and tagging...${NC}"
 git add package.json package-lock.json
 git commit -m "chore: Bump version to $NEW_VERSION"
 git tag "v$NEW_VERSION"
 echo ""
 
 # Step 5: Push to GitHub
-echo -e "${GREEN}[5/7] Pushing to GitHub...${NC}"
+echo -e "${GREEN}[5/8] Pushing to GitHub...${NC}"
 git push origin main --tags
 echo ""
 
-# Step 6: Update Homebrew tap
-echo -e "${GREEN}[6/7] Updating Homebrew tap...${NC}"
+# Step 6: Create GitHub Release
+echo -e "${GREEN}[6/8] Creating GitHub release...${NC}"
+gh release create "v$NEW_VERSION" --generate-notes --title "v$NEW_VERSION"
+echo ""
+
+# Step 7: Update Homebrew tap
+echo -e "${GREEN}[7/8] Updating Homebrew tap...${NC}"
 TARBALL_URL="https://github.com/brian-slate/juice-it/archive/refs/tags/v${NEW_VERSION}.tar.gz"
 
 # Wait a moment for GitHub to process the tag
@@ -84,8 +89,8 @@ sed -i '' "s|url \".*\"|url \"$TARBALL_URL\"|" "$FORMULA_FILE"
 sed -i '' "s|sha256 \".*\"|sha256 \"$SHA256\"|" "$FORMULA_FILE"
 echo ""
 
-# Step 7: Commit and push tap
-echo -e "${GREEN}[7/7] Pushing Homebrew tap...${NC}"
+# Step 8: Commit and push tap
+echo -e "${GREEN}[8/8] Pushing Homebrew tap...${NC}"
 cd "$TAP_REPO"
 git add Formula/juice-it.rb
 git commit -m "Update juice-it to v$NEW_VERSION"
