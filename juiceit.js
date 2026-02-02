@@ -11,6 +11,7 @@
  *   --help      Show this help message
  *   --output    Specify the output directory
  *   --dvdSource Specify the DVD source (e.g., /dev/disk5)
+ *   --title     Specify the movie/show title for TMDB lookup
  *   --quality   Set the encoding quality (e.g., 20)
  *   --no-deinterlace  Disable deinterlacing
  *   --subtitles  Specify the subtitle track number (default: 1)
@@ -606,11 +607,17 @@ function guessMediaType(numTitles) {
     return numTitles >= 3 ? 'tv' : 'movie';
 }
 
-async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
+async function lookupMetadata(volumeName, numTitles, trackDurations = null, searchOptions = {}) {
     console.log('\n🔍 Looking up metadata...');
-    
-    // Clean up the volume name for searching
-    const cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').trim();
+
+    // Use provided search title or clean up the volume name for searching
+    let cleanName;
+    if (searchOptions.searchTitle) {
+        cleanName = searchOptions.searchTitle.trim();
+        console.log(`   Using provided title: "${cleanName}"`);
+    } else {
+        cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').trim();
+    }
     const mediaType = guessMediaType(numTitles);
     
     log(`Searching for: "${cleanName}" (guessing type: ${mediaType})`);
@@ -629,9 +636,9 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                 ? tvResults.find(s => s.id === aiSelection.selectedId)
                 : movieResults.find(m => m.id === aiSelection.selectedId);
 
-            // In automatic mode (default): use AI selection regardless of confidence
-            // In interactive mode: only auto-select if confidence >= 0.8
-            const shouldAutoSelect = !options.interactive || aiSelection.confidence >= 0.8;
+            // Auto-select if confidence is 60% or higher
+            // Below 60%: prompt user for confirmation even in auto mode
+            const shouldAutoSelect = aiSelection.confidence >= 0.6;
 
             if (selectedResult && shouldAutoSelect) {
                 const confidenceStr = aiSelection.confidence >= 0.8 ? '' : ` (${(aiSelection.confidence * 100).toFixed(0)}% confidence)`;
@@ -657,13 +664,35 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                         aiSelected: true
                     };
                 }
-            } else if (options.interactive && aiSelection.confidence < 0.8) {
-                console.log(`\n   ℹ️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%), showing manual selection...`);
+            } else if (aiSelection.confidence < 0.6) {
+                // Low confidence - exit with helpful instructions
+                const suggestion = selectedResult
+                    ? (aiSelection.selectedType === 'tv' ? selectedResult.name : selectedResult.title)
+                    : null;
+
+                console.log(`\n   ⚠️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%)`);
+                console.log(`   The disc name "${cleanName}" doesn't clearly match any known title.`);
+                if (suggestion) {
+                    console.log(`   Best guess: "${suggestion}" (but not confident enough to auto-select)\n`);
+                } else {
+                    console.log('');
+                }
+                console.log('━'.repeat(60));
+                console.log('  To rip this disc, use one of these options:\n');
+                console.log('  1. Specify the title:');
+                console.log('     juice-it --title "Movie Name"');
+                console.log('     juice-it --title "TV Show Name"\n');
+                console.log('  2. Use interactive mode to search and select:');
+                console.log('     juice-it --interactive\n');
+                console.log('  3. Skip metadata lookup entirely (raw rip):');
+                console.log('     juice-it --raw');
+                console.log('━'.repeat(60) + '\n');
+                process.exit(1);
             }
         }
     }
 
-    // In automatic mode without AI: use first result or disc name
+    // In automatic mode without AI: use first result or prompt for title if no results
     if (!options.interactive) {
         if (mediaType === 'tv' && tvResults.length > 0) {
             const show = tvResults[0];
@@ -686,8 +715,20 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
                 year: movie.release_date ? movie.release_date.split('-')[0] : null
             };
         } else {
-            console.log(`\n   📀 Using disc name: ${volumeName}`);
-            return { type: 'disc', volumeName };
+            // No TMDB results found - exit with helpful instructions
+            console.log(`\n   ❌ Couldn't identify disc automatically`);
+            console.log(`   The disc name "${cleanName}" doesn't match any known titles.\n`);
+            console.log('━'.repeat(60));
+            console.log('  To rip this disc, use one of these options:\n');
+            console.log('  1. Specify the title:');
+            console.log('     juice-it --title "Movie Name"');
+            console.log('     juice-it --title "TV Show Name"\n');
+            console.log('  2. Use interactive mode to search and select:');
+            console.log('     juice-it --interactive\n');
+            console.log('  3. Skip metadata lookup entirely (raw rip):');
+            console.log('     juice-it --raw');
+            console.log('━'.repeat(60) + '\n');
+            process.exit(1);
         }
     }
     
@@ -731,14 +772,17 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
     }
     
     // Add options for manual entry and using disc name
-    choices.push({ name: 'Enter custom name/prefix', value: { type: 'custom' } });
+    choices.push({ name: '🔍 Search for a different title...', value: { type: 'search' } });
+    choices.push({ name: 'Enter custom name/prefix (skip TMDB)', value: { type: 'custom' } });
     choices.push({ name: `Use disc name: "${volumeName}"`, value: { type: 'disc' } });
-    
-    if (choices.length === 2) {
-        // No results found
-        console.log('⚠️  No metadata found online\n');
-        log('No metadata found');
-        return { type: 'disc', volumeName };
+
+    if (choices.length === 3) {
+        // No TMDB results found - show helpful message but STILL show the prompt
+        // so users can search for a different title or enter custom name
+        console.log(`⚠️  No results found for "${cleanName}"\n`);
+        console.log('   The disc name may not match the actual title.');
+        console.log('   You can search for the correct title below.\n');
+        log('No TMDB results found, showing search prompt');
     }
     
     try {
@@ -759,7 +803,110 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null) {
         const selected = await prompt.run();
         log(`User selected: ${JSON.stringify(selected)}`);
         
-        if (selected.type === 'custom') {
+        if (selected.type === 'search') {
+            // User wants to search for a different title
+            const searchPrompt = new Input({
+                message: 'Enter the actual title to search for:',
+                initial: ''
+            });
+            const searchTitle = await searchPrompt.run();
+            log(`User searching for: ${searchTitle}`);
+
+            if (!searchTitle.trim()) {
+                console.log('   No title entered, using disc name.\n');
+                return { type: 'disc', volumeName };
+            }
+
+            // Search TMDB with the new title
+            console.log(`\n🔍 Searching for "${searchTitle}"...\n`);
+            const newMovieResults = await searchTMDB(searchTitle, false);
+            const newTvResults = await searchTMDB(searchTitle, true);
+
+            if (newMovieResults.length === 0 && newTvResults.length === 0) {
+                console.log(`   ⚠️  No results found for "${searchTitle}" either.\n`);
+                // Recursive: let them try again or choose another option
+                return lookupMetadata(volumeName, numTitles, trackDurations, searchOptions);
+            }
+
+            // Build new choices from search results
+            const newChoices = [];
+            newMovieResults.slice(0, 5).forEach(movie => {
+                const year = movie.release_date ? `(${movie.release_date.split('-')[0]})` : '';
+                newChoices.push({
+                    name: `Movie: ${movie.title} ${year}`,
+                    value: { type: 'movie', data: movie },
+                    hint: movie.overview ? movie.overview.substring(0, 80) + '...' : ''
+                });
+            });
+            newTvResults.slice(0, 5).forEach(show => {
+                const year = show.first_air_date ? `(${show.first_air_date.split('-')[0]})` : '';
+                newChoices.push({
+                    name: `TV: ${show.name} ${year}`,
+                    value: { type: 'tv', data: show },
+                    hint: show.overview ? show.overview.substring(0, 80) + '...' : ''
+                });
+            });
+            newChoices.push({ name: '🔍 Search for a different title...', value: { type: 'search' } });
+            newChoices.push({ name: 'Enter custom name/prefix (skip TMDB)', value: { type: 'custom' } });
+            newChoices.push({ name: `Use disc name: "${volumeName}"`, value: { type: 'disc' } });
+
+            console.log(`   ✓ Found ${newMovieResults.length} movies, ${newTvResults.length} TV shows\n`);
+
+            // Show new selection prompt
+            const newPrompt = new Select({
+                name: 'media',
+                message: 'Select the correct match:',
+                choices: newChoices.map(c => ({
+                    name: c.name,
+                    value: c.value,
+                    hint: c.hint
+                })),
+                result(_name) {
+                    return this.focused.value;
+                }
+            });
+
+            const newSelected = await newPrompt.run();
+            log(`User selected from new search: ${JSON.stringify(newSelected)}`);
+
+            // Handle the new selection (recursively process)
+            if (newSelected.type === 'search') {
+                return lookupMetadata(volumeName, numTitles, trackDurations, searchOptions);
+            } else if (newSelected.type === 'custom') {
+                const customPrompt = new Input({
+                    message: 'Enter name or prefix for episodes:',
+                    initial: searchTitle
+                });
+                const customName = await customPrompt.run();
+                return { type: 'custom', name: customName };
+            } else if (newSelected.type === 'disc') {
+                return { type: 'disc', volumeName };
+            } else if (newSelected.type === 'tv') {
+                const seasonPrompt = new Input({
+                    message: 'Enter season number (default: 1):',
+                    initial: '1',
+                    validate(value) {
+                        return /^\d+$/.test(value) || 'Please enter a valid number';
+                    }
+                });
+                const season = parseInt(await seasonPrompt.run());
+                const seasonDetails = await getTVSeasonDetails(newSelected.data.id, season);
+                const showYear = newSelected.data.first_air_date ? newSelected.data.first_air_date.split('-')[0] : null;
+                return {
+                    type: 'tv',
+                    name: newSelected.data.name,
+                    year: showYear,
+                    season: season,
+                    episodes: seasonDetails ? seasonDetails.episodes : null
+                };
+            } else {
+                return {
+                    type: 'movie',
+                    name: newSelected.data.title,
+                    year: newSelected.data.release_date ? newSelected.data.release_date.split('-')[0] : null
+                };
+            }
+        } else if (selected.type === 'custom') {
             const namePrompt = new Input({
                 message: 'Enter name or prefix for episodes:',
                 initial: cleanName
@@ -884,6 +1031,9 @@ args.forEach((arg, index) => {
         consumedIndices.add(index + 1);
     } else if (arg === '--dvdSource' && args[index + 1]) {
         options.dvdSource = args[index + 1];
+        consumedIndices.add(index + 1);
+    } else if (arg === '--title' && args[index + 1]) {
+        options.searchTitle = args[index + 1];
         consumedIndices.add(index + 1);
     } else if (arg === '--quality' && args[index + 1]) {
         options.encoding.quality = args[index + 1];
@@ -1448,6 +1598,139 @@ Command would be: HandBrakeCLI -i ${options.dvdSource} -t ${titleNumber} -o ${ou
     });
 }
 
+// Reset the DVD drive after a stuck read (eject and wait for remount)
+async function resetDvdDrive(dvdSource) {
+    return new Promise((resolve) => {
+        logger.debug('Resetting DVD drive to clear stuck I/O...');
+        console.log('   🔄 Resetting DVD drive...');
+
+        // Try multiple eject methods - drutil is most forceful (talks to firmware)
+        let ejected = false;
+
+        // Method 1: drutil eject (most forceful - direct to drive firmware)
+        const drutilResult = spawnSync('drutil', ['eject'], { timeout: 5000 });
+        if (drutilResult.status === 0) {
+            ejected = true;
+            logger.debug('Ejected via drutil');
+        }
+
+        // Method 2: diskutil eject
+        if (!ejected) {
+            const diskutilResult = spawnSync('diskutil', ['eject', dvdSource], { timeout: 5000 });
+            if (diskutilResult.status === 0) {
+                ejected = true;
+                logger.debug('Ejected via diskutil eject');
+            }
+        }
+
+        // Method 3: diskutil unmount force
+        if (!ejected) {
+            const unmountResult = spawnSync('diskutil', ['unmount', 'force', dvdSource], { timeout: 5000 });
+            if (unmountResult.status === 0) {
+                ejected = true;
+                logger.debug('Ejected via diskutil unmount force');
+            }
+        }
+
+        if (!ejected) {
+            console.log('   ⚠️  Could not eject disc - you may need to unplug/replug the drive');
+            logger.debug('All eject methods failed');
+            resolve(false);
+            return;
+        }
+
+        console.log('   📀 Disc ejected - please reinsert to continue...');
+
+        // Wait for disc to be reinserted and mounted
+        let attempts = 0;
+        const maxAttempts = 60; // 60 seconds max wait for user to reinsert
+        const checkInterval = setInterval(() => {
+            attempts++;
+
+            // Check if any DVD is mounted
+            const result = spawnSync('diskutil', ['list'], { timeout: 5000 });
+            const output = result.stdout?.toString() || '';
+
+            // Look for optical media (UDF filesystem typically)
+            if (output.includes('UDF') || output.includes(dvdSource.replace('/dev/', ''))) {
+                clearInterval(checkInterval);
+                // Give it a moment to fully mount
+                setTimeout(() => {
+                    console.log('   ✓ DVD drive reset complete');
+                    logger.debug('DVD drive reset successful');
+                    resolve(true);
+                }, 2000);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(checkInterval);
+                console.log('   ⚠️  Timeout waiting for disc - please reinsert and try again');
+                logger.debug('DVD drive reset timeout - disc not remounted');
+                resolve(false);
+            } else if (attempts % 15 === 0) {
+                console.log(`   ⏳ Waiting for disc to be reinserted... (${attempts}s)`);
+            }
+        }, 1000);
+    });
+}
+
+// Scan a single title with timeout (for fallback when full scan gets stuck)
+// Kept for potential future use but currently unused (we skip stuck tracks instead)
+async function _scanSingleTitle(dvdSource, titleNum, timeoutMs = 30000) {
+    return new Promise((resolve) => {
+        const args = ['-i', dvdSource, '--title', String(titleNum), '--scan', '--previews', '0:0'];
+        const handbrakeProcess = spawn('HandBrakeCLI', args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let _output = '';
+        let duration = null;
+        let resolved = false;
+
+        const timeout = setTimeout(async () => {
+            if (!resolved) {
+                resolved = true;
+                handbrakeProcess.kill('SIGKILL'); // Use SIGKILL for immediate termination
+                // Reset the drive to clear kernel I/O stuck state
+                await resetDvdDrive(dvdSource);
+                resolve({ titleNum, duration: null, stuck: true });
+            }
+        }, timeoutMs);
+
+        const processData = (data) => {
+            if (resolved) return;
+            const chunk = data.toString();
+            _output += chunk;
+
+            // Parse duration
+            const durationMatch = chunk.match(/scan: duration is (\d{2}):(\d{2}):(\d{2})/);
+            if (durationMatch) {
+                const hours = parseInt(durationMatch[1], 10);
+                const mins = parseInt(durationMatch[2], 10);
+                const secs = parseInt(durationMatch[3], 10);
+                duration = hours * 60 + mins + Math.round(secs / 60);
+            }
+        };
+
+        handbrakeProcess.stdout.on('data', processData);
+        handbrakeProcess.stderr.on('data', processData);
+
+        handbrakeProcess.on('close', () => {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve({ titleNum, duration, stuck: false });
+            }
+        });
+
+        handbrakeProcess.on('error', () => {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve({ titleNum, duration: null, stuck: true });
+            }
+        });
+    });
+}
+
 // Get volume name using diskutil
 function getVolumeName() {
     try {
@@ -1512,6 +1795,40 @@ async function getNumberOfTitles() {
         let scannedTitlesCount = 0;
         const titleDurations = {};
         let resolved = false;
+        let lastProgressTime = Date.now();
+        let lastScanPercentage = null;
+        let stuckTitle = null;
+        const STUCK_TIMEOUT_MS = 30000; // 30 seconds without ANY progress = stuck
+
+        // Stuck detection timer - check every 5 seconds
+        const stuckCheckInterval = setInterval(() => {
+            if (resolved) {
+                clearInterval(stuckCheckInterval);
+                return;
+            }
+
+            const timeSinceProgress = Date.now() - lastProgressTime;
+            if (timeSinceProgress > STUCK_TIMEOUT_MS && scannedTitlesCount > 0) {
+                clearInterval(stuckCheckInterval);
+                process.stdout.write('\r' + ' '.repeat(60) + '\r');
+                const stuckMsg = `Title ${stuckTitle || lastReportedTitle} appears stuck (no progress for ${STUCK_TIMEOUT_MS/1000}s, last %: ${lastScanPercentage})`;
+                console.log(`   ⚠️  ${stuckMsg} - skipping remaining titles`);
+                logger.debug(`STUCK DETECTION: ${stuckMsg}`);
+                logger.debug(`Scanned ${scannedTitlesCount} of ${totalTitles} titles before stuck`);
+                logger.debug(`Durations collected: ${JSON.stringify(titleDurations)}`);
+                // Use SIGKILL for immediate termination (SIGTERM can leave zombies on stuck I/O)
+                handbrakeProcess.kill('SIGKILL');
+                // Reset the DVD drive to clear kernel I/O stuck state, then resolve
+                setTimeout(async () => {
+                    if (!resolved) {
+                        resolved = true;
+                        // Reset the drive to stop kernel read-retry loop
+                        await resetDvdDrive(options.dvdSource);
+                        resolve({ code: 0, output, titleDurations, totalTitles, stuckAtTitle: stuckTitle || lastReportedTitle });
+                    }
+                }, 500);
+            }
+        }, 5000);
 
         const processData = (data) => {
             if (resolved) return; // Stop processing after we resolve
@@ -1528,6 +1845,7 @@ async function getNumberOfTitles() {
             if (totalMatch) {
                 totalTitles = parseInt(totalMatch[1], 10);
                 console.log(`   Found ${totalTitles} title${totalTitles > 1 ? 's' : ''} - scanning each...`);
+                lastProgressTime = Date.now();
             }
 
             // Check for current title being scanned and show progress
@@ -1536,7 +1854,20 @@ async function getNumberOfTitles() {
                 const currentTitle = parseInt(scanningMatch[1], 10);
                 if (currentTitle > lastReportedTitle) {
                     lastReportedTitle = currentTitle;
+                    stuckTitle = currentTitle; // Track which title we're on in case it gets stuck
+                    lastScanPercentage = null; // Reset percentage tracking for new title
+                    lastProgressTime = Date.now(); // New title = progress
                     process.stdout.write(`\r   Scanning track ${currentTitle}${totalTitles > 0 ? ' of ' + totalTitles : ''}...`);
+                }
+            }
+
+            // Track scan percentage within a title - if it changes, we're making progress
+            const percentMatch = chunk.match(/Scanning title \d+ of \d+, (\d+\.\d+) %/);
+            if (percentMatch) {
+                const currentPercent = parseFloat(percentMatch[1]);
+                if (lastScanPercentage === null || currentPercent > lastScanPercentage) {
+                    lastScanPercentage = currentPercent;
+                    lastProgressTime = Date.now(); // Percentage increased = progress
                 }
             }
 
@@ -1549,13 +1880,16 @@ async function getNumberOfTitles() {
                 const totalMinutes = hours * 60 + mins + Math.round(secs / 60);
                 titleDurations[lastReportedTitle] = totalMinutes;
                 scannedTitlesCount++;
+                lastProgressTime = Date.now(); // Reset stuck timer on progress
+                stuckTitle = null; // Clear stuck title since this one completed
 
                 // Kill process once we have all title durations - HandBrakeCLI hangs on post-processing
                 if (totalTitles > 0 && scannedTitlesCount >= totalTitles) {
                     resolved = true;
+                    clearInterval(stuckCheckInterval);
                     process.stdout.write('\r' + ' '.repeat(50) + '\r');
-                    handbrakeProcess.kill('SIGTERM');
-                    resolve({ code: 0, output, titleDurations, totalTitles });
+                    handbrakeProcess.kill('SIGKILL');
+                    setTimeout(() => resolve({ code: 0, output, titleDurations, totalTitles }), 500);
                 }
             }
         };
@@ -1565,12 +1899,14 @@ async function getNumberOfTitles() {
 
         handbrakeProcess.on('error', (error) => {
             if (!resolved) {
+                clearInterval(stuckCheckInterval);
                 reject(new Error(`HandBrakeCLI failed to start: ${error.message}`));
             }
         });
 
         handbrakeProcess.on('close', (code) => {
             if (!resolved) {
+                clearInterval(stuckCheckInterval);
                 // Clear the scanning line
                 process.stdout.write('\r' + ' '.repeat(50) + '\r');
                 resolve({ code, output, titleDurations, totalTitles });
@@ -1578,17 +1914,26 @@ async function getNumberOfTitles() {
         });
     });
 
-    const { code, output, titleDurations } = scanResult;
+    const { code, output, titleDurations, totalTitles: _totalTitles, stuckAtTitle } = scanResult;
 
     if (code === 0 || output.includes('scan: DVD has')) {
         const match = output.match(/scan: DVD has (\d+) title/);
         if (match) {
             const numTitles = parseInt(match[1], 10);
-            console.log(`✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
-            console.log('');
 
             // Use durations collected during scanning (we kill process early before final output)
             const finalDurations = { ...titleDurations };
+
+            // If we got stuck, skip remaining tracks (they're likely all copy-protected)
+            // Trying to scan them individually causes the same kernel I/O stuck issue
+            if (stuckAtTitle && stuckAtTitle < numTitles) {
+                const skippedCount = numTitles - stuckAtTitle;
+                console.log(`   ℹ️  Skipping ${skippedCount} remaining track(s) (likely copy-protected)`);
+                logger.debug(`COPY PROTECTION: Skipping tracks ${stuckAtTitle + 1}-${numTitles} to avoid kernel I/O issues`);
+            }
+
+            console.log(`✓ Found ${numTitles} title${numTitles > 1 ? 's' : ''}`);
+            console.log('');
 
             // Store globally for use during ripping
             global.dvdTitleDurations = finalDurations;
@@ -2206,7 +2551,12 @@ async function ripAllTracks() {
         
         // Set default output directory before any operations
         setDefaultOutputDir(volumeName);
-        
+
+        // Initialize file logging early so scan operations are logged
+        logFilePath = initializeLog(options.outputDir, volumeName);
+        log(`JuiceIt session started - Volume: ${volumeName}, Source: ${options.dvdSource}`);
+        log(`Options: scanOnly=${options.scanOnly}, verbose=${options.verbose}, interactive=${options.interactive}`);
+
         printBanner(volumeName); // Show the banner
 
         const numTitles = await getNumberOfTitles(); // Get the number of titles
@@ -2243,7 +2593,9 @@ async function ripAllTracks() {
             logger.debug('Raw mode enabled - skipping metadata lookup');
             metadata = { type: 'raw', volumeName };
         } else if (!options.noLookup) {
-            metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations);
+            metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations, {
+                searchTitle: options.searchTitle
+            });
         } else {
             metadata = { type: 'disc', volumeName };
         }
@@ -2528,6 +2880,21 @@ async function ripAllTracks() {
                 useSequentialMapping = true;
             }
 
+            // For movies: determine the main feature track (longest track)
+            let mainFeatureTrack = null;
+            if (metadata.type === 'movie' && global.dvdTitleDurations) {
+                // Find the longest track (main feature)
+                let maxDuration = 0;
+                for (const [trackNum, duration] of Object.entries(global.dvdTitleDurations)) {
+                    if (duration > maxDuration) {
+                        maxDuration = duration;
+                        mainFeatureTrack = parseInt(trackNum, 10);
+                    }
+                }
+                logger.debug(`[Movie] Main feature track: ${mainFeatureTrack} (${maxDuration} min)`);
+                log(`Movie mode: Main feature is Track ${mainFeatureTrack} (${maxDuration} min)`);
+            }
+
             // Build proposed mappings with track info before ripping
         for (let titleNumber = 1; titleNumber <= numTitles; titleNumber++) {
             const trackDuration = global.dvdTitleDurations ? global.dvdTitleDurations[titleNumber] : null;
@@ -2536,8 +2903,16 @@ async function ripAllTracks() {
             let aiReasoning = null;
             let aiConfidence = null;
 
+            // Skip tracks with 0-duration (copy-protected/invalid tracks)
+            if (trackDuration === 0) {
+                status = 'skip';
+                proposedName = '(will skip - 0 duration)';
+                aiReasoning = 'Track has 0 duration (likely copy-protected or invalid)';
+                aiConfidence = null;
+                logger.debug(`Track ${titleNumber}: Skipping (0 duration)`);
+            }
             // Use AI mapping if available
-            if (aiMappingResult && aiMappingResult.mappings) {
+            else if (aiMappingResult && aiMappingResult.mappings) {
                 const aiMapping = aiMappingResult.mappings.find(m => m.trackNum === titleNumber);
                 if (aiMapping) {
                     if (aiMapping.shouldSkip) {
@@ -2559,11 +2934,27 @@ async function ripAllTracks() {
                     logger.debug(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
                 }
             } else if (useSequentialMapping) {
-                // User explicitly chose sequential mapping
-                proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
-                if (metadata.type === 'tv') {
-                    aiReasoning = '⚠️ Sequential mapping (user selected) - verify track assignments';
-                    aiConfidence = 0;
+                // Movies: only rip the main feature (longest track), skip everything else as extras
+                if (metadata.type === 'movie' && mainFeatureTrack !== null) {
+                    if (titleNumber === mainFeatureTrack) {
+                        // Main feature - use clean movie filename without "Part N"
+                        proposedName = `${baseFileName}.mp4`;
+                        aiReasoning = 'Main feature (longest track)';
+                        aiConfidence = 1.0;
+                    } else {
+                        // Extras - skip by default (can be ripped with --include-extras)
+                        status = 'skip';
+                        proposedName = '(will skip - extra)';
+                        aiReasoning = `Extra/bonus content (use --include-extras to rip)`;
+                        aiConfidence = 1.0;
+                    }
+                } else {
+                    // TV shows or no track durations - use original sequential logic
+                    proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
+                    if (metadata.type === 'tv') {
+                        aiReasoning = '⚠️ Sequential mapping (user selected) - verify track assignments';
+                        aiConfidence = 0;
+                    }
                 }
             } else {
                 // Shouldn't reach here for TV shows, but fallback just in case
@@ -2655,6 +3046,25 @@ async function ripAllTracks() {
         }
         console.log('━'.repeat(60));
         console.log('');
+
+        // Show movie-specific info
+        if (metadata.type === 'movie') {
+            const mainTrack = mappingsToRip.find(m => m.status !== 'skip' && m.aiReasoning === 'Main feature (longest track)');
+            const extrasCount = mappingsToRip.filter(m => m.status === 'skip' && m.aiReasoning && m.aiReasoning.includes('Extra')).length;
+            const zeroCount = mappingsToRip.filter(m => m.status === 'skip' && m.aiReasoning && m.aiReasoning.includes('0 duration')).length;
+
+            if (mainTrack) {
+                console.log(`  🎬 Movie: Ripping main feature (Track ${mainTrack.trackNum}, ${mainTrack.duration} min)`);
+                if (extrasCount > 0) {
+                    console.log(`     ${extrasCount} extra track(s) will be skipped`);
+                    console.log(`     Use --include-extras to also rip bonus content`);
+                }
+                if (zeroCount > 0) {
+                    console.log(`     ${zeroCount} invalid track(s) skipped (0 duration)`);
+                }
+                console.log('');
+            }
+        }
 
         // Log final mapping table before ripping
         log('=== FINAL TRACK TO FILENAME MAPPINGS ===');
@@ -3289,6 +3699,8 @@ Options:
   --setup           Configure TMDB API key for metadata lookup
   --output          Specify the output directory (default: <disc_name>_<date>)
   --dvdSource       Specify the DVD source path (e.g., /dev/disk5)
+  --title           Specify the movie/show title for TMDB lookup
+                    (useful when disc name is cryptic, e.g., "K0_72")
   --quality         Set the encoding quality (e.g., 20)
   --no-deinterlace  Disable deinterlacing
   --no-lookup       Skip online metadata lookup
@@ -3303,8 +3715,9 @@ Options:
                     (default: fully automatic with AI-powered decisions)
   --raw             Raw rip mode - skip metadata lookup and AI mapping
                     Rips all tracks with simple names (discname_1.mp4, etc.)
-  --include-extras  Also rip tracks that AI marked as menus/extras/unknown
-                    Useful for getting bonus content, secret tracks, etc.
+  --include-extras  Also rip extras (bonus features, behind-the-scenes, etc.)
+                    Movies: Only the main feature is ripped by default
+                    TV shows: Only episode tracks are ripped by default
   --dry-run         Create stub files instead of actual ripping
                     Useful for testing the workflow without waiting for encoding
   --help-dev        Show developer commands (make, npm, testing)
@@ -3312,6 +3725,8 @@ Options:
 
 Example:
   juice-it --output /path/to/output --dvdSource /dev/disk5
+  juice-it --title "Cowboy Bebop"  # Search by title when disc name is cryptic
+  juice-it --include-extras        # Also rip bonus features/extras
   juice-it --verbose  # Show detailed HandBrakeCLI output
   juice-it --no-lookup  # Skip metadata lookup and use disc name
   juice-it --rename-only --output ./output  # Rename existing files
