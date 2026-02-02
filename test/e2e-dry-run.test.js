@@ -88,6 +88,34 @@ function testHelpDevCommand() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Test: Unknown flags are rejected
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testUnknownFlagRejected() {
+    console.log('Test: Unknown flags are rejected with error');
+    setup();
+
+    // Test with long flag
+    const result1 = runJuiceIt(['--unknown-flag']);
+    assert.strictEqual(result1.exitCode, 1, 'Unknown flag should exit with code 1');
+    assert(result1.stderr.includes('Unknown option'), 'Should show "Unknown option" error');
+    assert(result1.stderr.includes('--unknown-flag'), 'Error should mention the unknown flag');
+    assert(result1.stderr.includes('--help'), 'Error should suggest using --help');
+
+    // Test with short flag
+    const result2 = runJuiceIt(['-xyz']);
+    assert.strictEqual(result2.exitCode, 1, 'Unknown short flag should exit with code 1');
+    assert(result2.stderr.includes('Unknown option'), 'Should show "Unknown option" error for short flag');
+
+    // Ensure valid flags still work
+    const result3 = runJuiceIt(['--version']);
+    assert.strictEqual(result3.exitCode, 0, 'Valid flag --version should exit with code 0');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Test: Naming module is properly integrated
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -273,6 +301,7 @@ function testSummaryShowsSkippedTracks() {
 try {
     testHelpCommand();
     testHelpDevCommand();
+    testUnknownFlagRejected();
     testNamingModuleIntegration();
     testDryRunFlagRecognized();
     testPlexNamingInCode();

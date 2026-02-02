@@ -5,7 +5,7 @@
  * This script rips all tracks from a DVD using HandBrakeCLI.
  *
  * Usage:
- *   node juiceit.js [options]
+ *   juiceit [options]
  *
  * Options:
  *   --help      Show this help message
@@ -18,7 +18,7 @@
  *   --verbose   Show detailed technical output
  *
  * Example:
- *   node juiceit.js --output /path/to/output --dvdSource /dev/disk5
+ *   juiceit --output /path/to/output --dvdSource /dev/disk5
  *
  * Requirements:
  *   - Node.js
@@ -863,8 +863,16 @@ const options = {
     verbose: false // Default to clean output
 };
 
+// Track which argument indices are consumed as values for flags like --output, --dvdSource, etc.
+const consumedIndices = new Set();
+
 // Process command-line arguments
 args.forEach((arg, index) => {
+    // Skip if this index is a value for a previous flag
+    if (consumedIndices.has(index)) {
+        return;
+    }
+
     if (arg === '--help') {
         options.showHelp = true;
     } else if (arg === '--help-dev') {
@@ -872,40 +880,50 @@ args.forEach((arg, index) => {
     } else if (arg === '--version' || arg === '-v') {
         options.showVersion = true;
     } else if (arg === '--output' && args[index + 1]) {
-        options.outputDir = args[index + 1]; // Set outputDir from argument
+        options.outputDir = args[index + 1];
+        consumedIndices.add(index + 1);
     } else if (arg === '--dvdSource' && args[index + 1]) {
-        options.dvdSource = args[index + 1]; // Set dvdSource from argument
+        options.dvdSource = args[index + 1];
+        consumedIndices.add(index + 1);
     } else if (arg === '--quality' && args[index + 1]) {
-        options.encoding.quality = args[index + 1]; // Set quality from argument
+        options.encoding.quality = args[index + 1];
+        consumedIndices.add(index + 1);
     } else if (arg === '--no-deinterlace') {
-        options.encoding.deinterlace = false; // Disable deinterlacing
+        options.encoding.deinterlace = false;
     } else if (arg === '--subtitles' && args[index + 1]) {
-        options.subtitles.track = parseInt(args[index + 1], 10); // Set subtitle track from argument
+        options.subtitles.track = parseInt(args[index + 1], 10);
+        consumedIndices.add(index + 1);
     } else if (arg === '--sub-lang' && args[index + 1]) {
-        options.subtitles.language = args[index + 1]; // Set subtitle language from argument
+        options.subtitles.language = args[index + 1];
+        consumedIndices.add(index + 1);
     } else if (arg === '--verbose') {
-        options.verbose = true; // Enable verbose output
+        options.verbose = true;
     } else if (arg === '--no-lookup') {
-        options.noLookup = true; // Skip metadata lookup
+        options.noLookup = true;
     } else if (arg === '--rename-only') {
-        options.renameOnly = true; // Only rename existing files
+        options.renameOnly = true;
     } else if (arg === '--scan-only') {
-        options.scanOnly = true; // Only scan and show metadata
+        options.scanOnly = true;
     } else if (arg === '--setup') {
-        options.runSetup = true; // Run API key setup
+        options.runSetup = true;
     } else if (arg === '--plan') {
-        options.planOnly = true; // Only create a plan, don't rip
+        options.planOnly = true;
     } else if (arg === '--interactive' || arg === '-i') {
-        options.interactive = true; // Enable interactive mode for manual review/selection
+        options.interactive = true;
     } else if (arg === '--diagnose') {
-        options.diagnose = true; // Run diagnostic mode - detailed mapping analysis
+        options.diagnose = true;
     } else if (arg === '--raw') {
-        options.rawMode = true; // Raw rip mode - skip all metadata/AI, just rip tracks
-        options.noLookup = true; // Implied: skip metadata lookup
+        options.rawMode = true;
+        options.noLookup = true;
     } else if (arg === '--include-extras') {
-        options.includeExtras = true; // Rip all tracks including those marked as skip
+        options.includeExtras = true;
     } else if (arg === '--dry-run') {
-        options.dryRun = true; // Create stub files instead of actual ripping
+        options.dryRun = true;
+    } else if (arg.startsWith('-')) {
+        // Unknown flag - show error and exit
+        console.error(`Error: Unknown option '${arg}'`);
+        console.error(`Run 'juiceit --help' for usage information.`);
+        process.exit(1);
     }
 });
 
@@ -3264,7 +3282,7 @@ function analyzeMappingIssues(aiMappingResult, metadata) {
 function showHelp() {
     console.log(`
 Usage:
-  node juiceit.js [options]
+  juiceit [options]
 
 Options:
   --help            Show this help message
@@ -3293,11 +3311,11 @@ Options:
   --version, -v     Show version number
 
 Example:
-  node juiceit.js --output /path/to/output --dvdSource /dev/disk5
-  node juiceit.js --verbose  # Show detailed HandBrakeCLI output
-  node juiceit.js --no-lookup  # Skip metadata lookup and use disc name
-  node juiceit.js --rename-only --output ./output  # Rename existing files
-  node juiceit.js --raw  # Quick raw rip without metadata or AI
+  juiceit --output /path/to/output --dvdSource /dev/disk5
+  juiceit --verbose  # Show detailed HandBrakeCLI output
+  juiceit --no-lookup  # Skip metadata lookup and use disc name
+  juiceit --rename-only --output ./output  # Rename existing files
+  juiceit --raw  # Quick raw rip without metadata or AI
 `);
 }
 
