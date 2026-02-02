@@ -197,8 +197,8 @@ function testPlexNamingInCode() {
         'Naming module should use "Part" for multi-part movies'
     );
     assert(
-        namingContent.includes('Extra Track'),
-        'Naming module should have Extra Track naming'
+        namingContent.includes('featurette') && namingContent.includes('Bonus'),
+        'Naming module should have Plex-compatible extras naming (featurette-Bonus)'
     );
 
     // Check that year is stored for TV shows

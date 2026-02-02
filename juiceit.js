@@ -3081,7 +3081,8 @@ async function ripAllTracks() {
             for (const mapping of mappingsToRip) {
                 if (mapping.status === 'skip') {
                     // Generate an extras filename for this track (Plex-compatible)
-                    const extraName = `${baseFileName} - Extra Track ${mapping.trackNum}.mp4`;
+                    // Format: MovieName (Year)-featurette-Bonus N.mp4
+                    const extraName = `${baseFileName}-featurette-Bonus ${mapping.trackNum}.mp4`;
                     mapping.status = extraName;
                     mapping.wasSkipped = true; // Track that this was originally skipped
                     log(`--include-extras: Track ${mapping.trackNum} (was skip) → ${extraName}`);

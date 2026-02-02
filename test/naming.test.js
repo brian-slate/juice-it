@@ -249,13 +249,19 @@ function testBuildBaseFileNameFallback() {
 console.log('━━━ buildExtrasFileName() Tests ━━━\n');
 
 function testBuildExtrasFileName() {
-    console.log('Test: buildExtrasFileName generates correct format');
+    console.log('Test: buildExtrasFileName generates Plex-compatible format');
 
+    // Default type is 'featurette'
     const result1 = buildExtrasFileName('Avatar (2009)', 1);
     const result2 = buildExtrasFileName('Avatar (2009)', 5);
 
-    assert.strictEqual(result1, 'Avatar (2009) - Extra Track 1.mp4');
-    assert.strictEqual(result2, 'Avatar (2009) - Extra Track 5.mp4');
+    // Plex format: MovieName (Year)-type-Description.mp4
+    assert.strictEqual(result1, 'Avatar (2009)-featurette-Bonus 1.mp4');
+    assert.strictEqual(result2, 'Avatar (2009)-featurette-Bonus 5.mp4');
+
+    // Test with custom extra type
+    const result3 = buildExtrasFileName('Avatar (2009)', 1, 'deleted');
+    assert.strictEqual(result3, 'Avatar (2009)-deleted-Bonus 1.mp4');
 
     console.log('  ✓ PASS\n');
 }
