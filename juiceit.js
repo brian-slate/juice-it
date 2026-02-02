@@ -1548,15 +1548,44 @@ Command would be: HandBrakeCLI -i ${options.dvdSource} -t ${titleNumber} -o ${ou
         const handbrakeProcess = spawn('HandBrakeCLI', args);
         let lastProgress = 0;
         let errorOutput = '';
+        let resolved = false;
+
+        // Stuck detection: track last activity time for both scanning and encoding phases
+        let lastActivityTime = Date.now();
+        let lastScanPercent = null;
+        let isEncoding = false;
+        const STUCK_TIMEOUT_MS = 60000; // 60 seconds without progress = stuck
+
+        // Check for stuck process every 10 seconds
+        const stuckCheckInterval = setInterval(() => {
+            if (resolved) {
+                clearInterval(stuckCheckInterval);
+                return;
+            }
+
+            const timeSinceActivity = Date.now() - lastActivityTime;
+            if (timeSinceActivity > STUCK_TIMEOUT_MS) {
+                clearInterval(stuckCheckInterval);
+                resolved = true;
+                const phase = isEncoding ? 'encoding' : 'scanning';
+                const stuckMsg = `Track ${titleNumber} stuck during ${phase} (no progress for ${STUCK_TIMEOUT_MS/1000}s)`;
+                log(stuckMsg);
+                logger.debug(`STUCK DETECTION: ${stuckMsg}`);
+                handbrakeProcess.kill('SIGKILL');
+                reject({ code: null, errorOutput: stuckMsg, titleNumber, stuck: true });
+            }
+        }, 10000);
 
         handbrakeProcess.stdout.on('data', (data) => {
             const output = data.toString();
             log(`[stdout] ${output.trim()}`);
             const progressMatch = output.match(/Encoding:.* (\d{1,3}\.\d{1,2}) %/);
             if (progressMatch && progressMatch[1]) {
+                isEncoding = true;
                 const progress = parseFloat(progressMatch[1]);
                 if (progress !== lastProgress) {
                     lastProgress = progress;
+                    lastActivityTime = Date.now(); // Progress = activity
                     const elapsedSeconds = (Date.now() - startTime) / 1000;
                     const estimatedTotal = progress > 0 ? (elapsedSeconds / progress) * 100 : 0;
                     const remainingSeconds = estimatedTotal - elapsedSeconds;
@@ -1570,9 +1599,29 @@ Command would be: HandBrakeCLI -i ${options.dvdSource} -t ${titleNumber} -o ${ou
             errorOutput += dataStr;
             log(`[stderr] ${dataStr.trim()}`);
             logger.debug(`[handbrake-info]: ${dataStr.trim()}`);
+
+            // Track scanning phase progress to detect stuck scans
+            const scanMatch = dataStr.match(/Scanning title \d+ of \d+, (\d+\.\d+) %/);
+            if (scanMatch) {
+                const scanPercent = parseFloat(scanMatch[1]);
+                if (lastScanPercent === null || scanPercent > lastScanPercent) {
+                    lastScanPercent = scanPercent;
+                    lastActivityTime = Date.now(); // Scan progress = activity
+                }
+            }
+
+            // Also count other meaningful output as activity (title info, duration, etc.)
+            if (dataStr.includes('duration:') || dataStr.includes('+ title') ||
+                dataStr.includes('autocrop:') || dataStr.includes('audio tracks:')) {
+                lastActivityTime = Date.now();
+            }
         });
 
         handbrakeProcess.on('close', (code) => {
+            if (resolved) return; // Already handled by stuck detection
+            resolved = true;
+            clearInterval(stuckCheckInterval);
+
             if (code === 0) {
                 log(`Track ${titleNumber} completed successfully`);
                 resolve();
