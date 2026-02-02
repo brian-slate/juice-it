@@ -1441,20 +1441,6 @@ if (options.runSetup) {
             console.log('');
         }
         
-        // Show AI status
-        if (!config.openaiApiKey) {
-            console.log('');
-            console.log('ℹ️  AI-powered mapping is NOT enabled');
-            console.log('   To enable automatic track mapping and TMDB selection:');
-            console.log('   1. Get an OpenAI API key: https://platform.openai.com/api-keys');
-            console.log('   2. Run: juiceit --setup');
-            console.log('   Cost: ~$0.001 per disc');
-            console.log('');
-        } else {
-            console.log('');
-            console.log('✨ AI-powered mapping is enabled!');
-            console.log('');
-        }
     }
 
     // Async initialization function
@@ -2559,6 +2545,18 @@ async function ripAllTracks() {
         log(`Options: scanOnly=${options.scanOnly}, verbose=${options.verbose}, interactive=${options.interactive}`);
 
         printBanner(volumeName); // Show the banner
+
+        // Show AI/mode status after banner
+        if (options.rawMode) {
+            // Raw mode message will be shown later
+        } else if (!config.openaiApiKey) {
+            console.log('  ℹ️  AI mapping: disabled (no API key)');
+            console.log('     Run "juiceit --setup" to enable automatic track mapping');
+            console.log('');
+        } else {
+            console.log('  ✓ AI mapping: enabled');
+            console.log('');
+        }
 
         const numTitles = await getNumberOfTitles(); // Get the number of titles
 
