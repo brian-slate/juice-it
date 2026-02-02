@@ -1539,8 +1539,7 @@ Command would be: HandBrakeCLI -i ${options.dvdSource} -t ${titleNumber} -o ${ou
             '-e', options.encoding.encoder,
             '-q', options.encoding.quality,
             '-t', titleNumber.toString(),
-            '--audio-lang-list', 'eng,jpn,und', // Prefer English, then Japanese, then undefined
-            '--all-audio', // Include ALL audio tracks (not just the first)
+            '--all-audio', // Include ALL audio tracks from the source
             '--subtitle', options.subtitles.track.toString(), // Include the specified subtitle track
             '--decomb', // Use decomb filter for deinterlacing
             '--detelecine', // Use detelecine filter
