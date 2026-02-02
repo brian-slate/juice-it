@@ -78,8 +78,8 @@ function testHelpDevCommand() {
     const result = runJuiceIt(['--help-dev']);
 
     assert.strictEqual(result.exitCode, 0, 'Help-dev should exit with code 0');
-    assert(result.stdout.includes('make reinstall'), 'Help-dev should mention make reinstall');
-    assert(result.stdout.includes('npm test'), 'Help-dev should mention npm test');
+    assert(result.stdout.includes('make use-local'), 'Help-dev should mention make use-local');
+    assert(result.stdout.includes('make test'), 'Help-dev should mention make test');
     assert(result.stdout.includes('make release'), 'Help-dev should mention make release');
     assert(result.stdout.includes('Developer Commands'), 'Help-dev should have Developer Commands header');
 

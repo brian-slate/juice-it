@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * JuiceIt Script
+ * JuiceIt - Smart DVD Ripper
  *
  * This script rips all tracks from a DVD using HandBrakeCLI.
  *
  * Usage:
- *   juiceit [options]
+ *   juice-it [options]
  *
  * Options:
  *   --help      Show this help message
@@ -18,7 +18,7 @@
  *   --verbose   Show detailed technical output
  *
  * Example:
- *   juiceit --output /path/to/output --dvdSource /dev/disk5
+ *   juice-it --output /path/to/output --dvdSource /dev/disk5
  *
  * Requirements:
  *   - Node.js
@@ -922,7 +922,7 @@ args.forEach((arg, index) => {
     } else if (arg.startsWith('-')) {
         // Unknown flag - show error and exit
         console.error(`Error: Unknown option '${arg}'`);
-        console.error(`Run 'juiceit --help' for usage information.`);
+        console.error(`Run 'juice-it --help' for usage information.`);
         process.exit(1);
     }
 });
@@ -3282,7 +3282,7 @@ function analyzeMappingIssues(aiMappingResult, metadata) {
 function showHelp() {
     console.log(`
 Usage:
-  juiceit [options]
+  juice-it [options]
 
 Options:
   --help            Show this help message
@@ -3311,11 +3311,11 @@ Options:
   --version, -v     Show version number
 
 Example:
-  juiceit --output /path/to/output --dvdSource /dev/disk5
-  juiceit --verbose  # Show detailed HandBrakeCLI output
-  juiceit --no-lookup  # Skip metadata lookup and use disc name
-  juiceit --rename-only --output ./output  # Rename existing files
-  juiceit --raw  # Quick raw rip without metadata or AI
+  juice-it --output /path/to/output --dvdSource /dev/disk5
+  juice-it --verbose  # Show detailed HandBrakeCLI output
+  juice-it --no-lookup  # Skip metadata lookup and use disc name
+  juice-it --rename-only --output ./output  # Rename existing files
+  juice-it --raw  # Quick raw rip without metadata or AI
 `);
 }
 
@@ -3324,47 +3324,47 @@ function showDeveloperHelp() {
     console.log(`
 JuiceIt - Developer Commands
 
-Local Development:
+Setup & Installation:
   make help                   Show all make targets
   make install                Install npm dependencies
-  make test                   Run all automated tests
-  make reinstall              Link to local code (runs tests first)
-  make reinstall-release      Install from latest GitHub release
+  make use-local              Use LOCAL source code (npm link)
+  make use-homebrew               Use HOMEBREW release version
 
   Workflow:
-    1. make reinstall         (links local code)
-    2. Edit code
-    3. Test with 'juiceit'    (changes are instant, no rebuild!)
+    1. make use-local         (switch to local source code)
+    2. Edit juiceit.js        (make changes)
+    3. juice-it --help        (test immediately, no rebuild!)
+    4. make test              (run tests)
+    5. make release           (publish when ready)
+    6. make use-homebrew          (switch back to released version)
 
 Testing:
-  npm test                    Run all test suites
-  npm run test:core           Core functionality tests only
-  npm run test:prompts        Prompt/schema tests only
-  npm run test:runtime        Runtime analysis tests only
-  npm run test:openai         OpenAI API integration tests only
-  npm run demo                Run interactive mapping demo
-
-  make test                   Alias for npm test
-  make demo                   Alias for npm run demo
+  make test                   Run all automated tests
+  make test-core              Core functionality tests only
+  make test-prompts           Prompt/schema tests only
+  make test-runtime           Runtime analysis tests only
+  make test-openai            OpenAI API integration tests only
+  make demo                   Run interactive mapping demo
 
 Debugging:
-  juiceit --diagnose          Detailed mapping analysis for debugging
-  juiceit --verbose           Show HandBrakeCLI output during ripping
-  juiceit --dry-run           Create stub files instead of encoding
+  juice-it --diagnose         Detailed mapping analysis for debugging
+  juice-it --verbose          Show HandBrakeCLI output during ripping
+  juice-it --dry-run          Create stub files instead of encoding
 
-Release:
-  make release                Create a new release (interactive)
-  npm run release             Run standard-version and release script
+Releasing:
+  make release                Create patch release (1.2.3 -> 1.2.4)
+  make release-minor          Create minor release (1.2.3 -> 1.3.0)
+  make release-major          Create major release (1.2.3 -> 2.0.0)
 
 File Locations:
   Config:     ~/.config/juice-it/config.json
   Cache:      ~/Library/Caches/juice-it/*.json
-  Logs:       ./<output_dir>/rip-log-*.txt
+  Logs:       ./<output_dir>/juiceit_*.log
 
 Cleanup:
-  rm -rf test/test-output     Clean test artifacts
-  rm -rf ~/Library/Caches/juice-it    Clean disc cache
-  rm -rf ~/.config/juice-it   Clean config (removes API keys)
+  rm -rf test/test-output              Clean test artifacts
+  rm -rf ~/Library/Caches/juice-it     Clean disc cache
+  rm -rf ~/.config/juice-it            Clean config (removes API keys)
 
 Documentation:
   README.md                   Main documentation
