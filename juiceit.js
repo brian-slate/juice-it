@@ -530,7 +530,8 @@ async function aiValidateMappingResults({
     matchedType,
     seasonNumber,
     totalEpisodes,
-    mappingResults
+    mappingResults,
+    episodes = null  // TMDB episode list for cross-reference
 }) {
     try {
         logger.debug('[AI] Starting mapping validation');
@@ -549,7 +550,8 @@ async function aiValidateMappingResults({
             matchedType,
             seasonNumber,
             totalEpisodes,
-            mappingResults
+            mappingResults,
+            episodes  // Pass TMDB episode list for verification
         });
 
         // Call OpenAI with structured output validation
@@ -3853,7 +3855,8 @@ async function ripAllTracks() {
                     matchedType: 'tv',
                     seasonNumber: metadata.season,
                     totalEpisodes: metadata.episodes.length,
-                    mappingResults: aiMappingResult
+                    mappingResults: aiMappingResult,
+                    episodes: metadata.episodes  // TMDB episode list for cross-reference
                 });
 
                 // AI determines all warnings - no procedural pre-filtering

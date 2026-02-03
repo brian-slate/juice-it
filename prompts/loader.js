@@ -338,7 +338,8 @@ function buildMappingValidationPrompts({
     matchedType,
     seasonNumber,
     totalEpisodes,
-    mappingResults
+    mappingResults,
+    episodes = null  // TMDB episode list for cross-reference
 }) {
     // Build user query context
     let userQueryContext = 'No user query provided - matching based on disc volume name only.';
@@ -394,7 +395,19 @@ function buildMappingValidationPrompts({
                     ? mapping.episodeEndIndex + 1
                     : epStart;
                 const epRange = epStart === epEnd ? `E${epStart}` : `E${epStart}-E${epEnd}`;
-                detailLines.push(`| ${trackNum} | ${duration} min | ${epRange} | ${confidence} |`);
+
+                // Include episode titles from TMDB data if available
+                let epTitles = '';
+                if (episodes && episodes.length > 0) {
+                    const startEp = episodes.find(e => e.episode_number === epStart);
+                    const endEp = epStart !== epEnd ? episodes.find(e => e.episode_number === epEnd) : null;
+                    if (startEp) {
+                        epTitles = endEp
+                            ? ` "${startEp.name}" & "${endEp.name}"`
+                            : ` "${startEp.name}"`;
+                    }
+                }
+                detailLines.push(`| ${trackNum} | ${duration} min | ${epRange}${epTitles} | ${confidence} |`);
             } else {
                 detailLines.push(`| ${trackNum} | ${duration} min | unmapped | ${confidence} |`);
             }
@@ -410,6 +423,18 @@ function buildMappingValidationPrompts({
             const lastEp = sorted[sorted.length - 1] + 1;
             mappedEpisodeRange = `Episodes ${firstEp}-${lastEp}`;
             mappedEpisodeCount = episodeIndices.size;
+        }
+    }
+
+    // Build TMDB episode reference list so AI can verify episode titles match
+    let tmdbEpisodeList = 'TMDB episode data not available.';
+    if (episodes && episodes.length > 0) {
+        const episodeLines = episodes.slice(0, 30).map(ep => // Limit to first 30 to avoid token bloat
+            `| ${ep.episode_number} | ${ep.name || 'Untitled'} | ${ep.runtime || '?'} min |`
+        );
+        tmdbEpisodeList = `| Ep# | Title | Runtime |\n|-----|-------|--------|\n${episodeLines.join('\n')}`;
+        if (episodes.length > 30) {
+            tmdbEpisodeList += `\n... and ${episodes.length - 30} more episodes`;
         }
     }
 
@@ -429,7 +454,8 @@ function buildMappingValidationPrompts({
         tracksMatched: mappingResults?.summary?.tracksMatched || 0,
         tracksSkipped: mappingResults?.summary?.tracksSkipped || 0,
         overallConfidence: Math.round((mappingResults?.overallConfidence || 0) * 100),
-        trackMappingDetails
+        trackMappingDetails,
+        tmdbEpisodeList
     });
 
     return { system, user };

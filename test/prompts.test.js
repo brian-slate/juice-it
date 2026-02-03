@@ -1365,8 +1365,8 @@ function testBuildMappingValidationPrompts() {
 
     // Verify system prompt exists
     assert.ok(prompts.system.length > 0, 'System prompt should exist');
-    assert.strictEqual(prompts.system.includes('DVD expert'), true, 'System prompt should identify role');
-    assert.strictEqual(prompts.system.includes('Multi-Disc'), true, 'System prompt should mention multi-disc');
+    assert.strictEqual(prompts.system.includes('validate episode-to-track mappings'), true, 'System prompt should identify role');
+    assert.strictEqual(prompts.system.includes('Box sets'), true, 'System prompt should mention box sets/multi-disc');
 
     // Verify user prompt contains expected sections
     assert.strictEqual(prompts.user.includes('Ed Edd n Eddy season 2 disc 3'), true, 'Should include user query');

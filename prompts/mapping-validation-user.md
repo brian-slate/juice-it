@@ -40,9 +40,14 @@ Validate this episode mapping result comprehensively. You are the sole decision-
 ### 3C. Detailed Track Mappings
 {{trackMappingDetails}}
 
+### 3D. TMDB Episode Reference (for verification)
+{{tmdbEpisodeList}}
+
 ---
 
 ## SECTION 4: YOUR TASK
+
+**CRITICAL**: Use the TMDB episode list above to verify that mapped episode TITLES match their episode numbers. For example, if Track 2 is mapped to E1-E2, check that the track's content (from the original mapping) matches TMDB episodes 1 and 2.
 
 Perform a comprehensive validation of this mapping:
 
