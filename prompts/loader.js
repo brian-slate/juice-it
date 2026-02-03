@@ -85,7 +85,7 @@ function clearCache() {
  * @param {Object} params - Parameters for the prompt
  * @returns {{ system: string, user: string }} System and user prompts
  */
-function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieResults, tvResults }) {
+function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieResults, tvResults, userQuery = null, extractedInfo = null, lsdvdMetadata = null }) {
     const tmdbData = {
         movies: movieResults.slice(0, 5).map(m => ({
             id: m.id,
@@ -101,12 +101,58 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
         }))
     };
 
+    // Build user query context section
+    let userQueryContext = 'No user query provided - matching based on disc volume name only.';
+    if (userQuery) {
+        userQueryContext = `**User's Search Query**: "${userQuery}"`;
+    }
+
+    // Build extracted info context section (from AI query parsing)
+    let extractedContext = 'No pre-parsed query information available.';
+    if (extractedInfo) {
+        const parts = [];
+        parts.push(`**Extracted Title**: "${extractedInfo.searchQuery}"`);
+        if (extractedInfo.season) parts.push(`**Season**: ${extractedInfo.season}`);
+        if (extractedInfo.disc) parts.push(`**Disc**: ${extractedInfo.disc}`);
+        if (extractedInfo.year) parts.push(`**Year**: ${extractedInfo.year}`);
+        parts.push(`**Media Type**: ${extractedInfo.isTV ? 'TV Show' : 'Movie/Unknown'}`);
+        if (extractedInfo.isBoxSet) parts.push(`**Box Set**: Yes (multi-disc set detected)`);
+        parts.push(`**Extraction Confidence**: ${(extractedInfo.confidence * 100).toFixed(0)}%`);
+        if (extractedInfo.clarificationNeeded) {
+            parts.push(`**Clarification Needed**: ${extractedInfo.clarificationNeeded}`);
+        }
+        extractedContext = parts.join('\n');
+    }
+
+    // Build lsdvd metadata section
+    let lsdvdContext = 'Extended disc metadata not available.';
+    if (lsdvdMetadata) {
+        const parts = [];
+        parts.push(`**Disc Title (from lsdvd)**: ${lsdvdMetadata.discTitle || 'unknown'}`);
+        if (lsdvdMetadata.discId) parts.push(`**Disc ID**: ${lsdvdMetadata.discId}`);
+        if (lsdvdMetadata.longestTrack) parts.push(`**Longest Track**: ${lsdvdMetadata.longestTrack}`);
+
+        // Add track chapter summary (useful for distinguishing episodes from menus)
+        if (lsdvdMetadata.tracks) {
+            const trackSummary = Object.entries(lsdvdMetadata.tracks)
+                .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+                .slice(0, 10) // Limit to first 10 tracks
+                .map(([num, t]) => `Track ${num}: ${t.chapters} chapters, ${t.audioStreams} audio`)
+                .join(' | ');
+            parts.push(`**Track Overview**: ${trackSummary}`);
+        }
+        lsdvdContext = parts.join('\n');
+    }
+
     const system = renderPrompt('tmdb-match-system', {});
     const user = renderPrompt('tmdb-match-user', {
         volumeName,
         numTitles,
         trackDurations: JSON.stringify(trackDurations),
-        tmdbData: JSON.stringify(tmdbData, null, 2)
+        tmdbData: JSON.stringify(tmdbData, null, 2),
+        userQueryContext,
+        extractedContext,
+        lsdvdContext
     });
 
     return { system, user };
@@ -117,8 +163,9 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
  * @param {Object} params - Parameters for the prompt
  * @returns {{ system: string, user: string }} System and user prompts
  */
-function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [] }) {
+function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], discNumber = null }) {
     const episodes = metadata.episodes || [];
+    const totalEpisodes = episodes.length;
 
     // Build episode table (raw data, no analysis)
     const episodeTable = episodes.map((ep, _i) =>
@@ -229,15 +276,46 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
 ⚠️ **CRITICAL**: Never suggest ripping these tracks. Always mark them as \`shouldSkip: true\` with reasoning "Unrippable track (copy-protected or invalid)".`;
     }
 
+    // Build disc context section for multi-disc sets
+    let discContext = '';
+    if (discNumber && discNumber > 1 && totalEpisodes > 0) {
+        // Estimate which episodes this disc likely contains
+        // Assuming roughly equal episodes per disc, earlier discs would have handled earlier episodes
+        const avgEpisodesPerDisc = Math.ceil(totalEpisodes / 2); // Conservative estimate for 2-disc set
+        const estimatedStartEpisode = (discNumber - 1) * avgEpisodesPerDisc + 1;
+        const estimatedEndEpisode = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
+
+        discContext = `### 1E. Multi-Disc Context (CRITICAL)
+
+**This is Disc ${discNumber}** of a multi-disc set for Season ${metadata.season}.
+
+⚠️ **IMPORTANT**: Since this is NOT Disc 1, earlier episodes were likely on previous disc(s).
+- Season ${metadata.season} has ${totalEpisodes} total episodes
+- For Disc ${discNumber}, episodes should **NOT** start from Episode 1
+- Estimate: This disc likely contains episodes **${estimatedStartEpisode}-${estimatedEndEpisode}** (or similar range)
+- The \`episodeIndex\` values should reflect this offset (e.g., if starting at episode 15, use episodeIndex=14)
+
+Example for Disc 2 of a 26-episode season:
+- If Disc 1 had episodes 1-14, Disc 2 should have episodes 15-26
+- Track 2 would map to episodeIndex=14 (episode 15), NOT episodeIndex=0 (episode 1)
+`;
+    } else if (discNumber === 1) {
+        discContext = `### 1E. Multi-Disc Context
+
+**This is Disc 1** of the set. Episodes should start from Episode 1 (episodeIndex=0).
+`;
+    }
+
     const system = renderPrompt('track-mapping-system', {});
     const user = renderPrompt('track-mapping-user', {
         showName: metadata.name,
         season: metadata.season,
-        episodeCount: episodes.length,
+        episodeCount: totalEpisodes,
         episodeTable: episodeTableFormatted,
         trackTable: trackTableFormatted,
         lsdvdInfo,
         unrippableInfo,
+        discContext,
         runtimeSummary,
         computationalHints
     });

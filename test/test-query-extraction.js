@@ -38,13 +38,23 @@ function loadConfig() {
     return {};
 }
 
-// Schema for query extraction
+// Schema for suggested alternative searches
+const SuggestedSearchSchema = z.object({
+    query: z.string().describe('Alternative search query to try'),
+    reason: z.string().describe('Why this alternative might help')
+});
+
+// Schema for query extraction (enhanced with multi-query support)
 const QueryExtractionSchema = z.object({
     searchQuery: z.string().describe('The cleaned title to search TMDB'),
     season: z.number().nullable().describe('Season number if mentioned'),
     disc: z.number().nullable().describe('Disc number if mentioned'),
     year: z.number().nullable().describe('Year if mentioned'),
     isTV: z.boolean().describe('Whether this appears to be a TV show'),
+    isBoxSet: z.boolean().describe('Whether this appears to be a box set or complete series'),
+    suggestedSearches: z.array(SuggestedSearchSchema).nullable().describe('Alternative search queries or null'),
+    clarificationNeeded: z.string().nullable().describe('What clarification is needed or null'),
+    confidence: z.number().min(0).max(1).describe('Confidence in extraction accuracy'),
     reasoning: z.string().describe('Brief explanation')
 });
 
@@ -68,6 +78,10 @@ Given a user's input (which may include extra words), extract:
 3. disc: Disc number if mentioned (null if not)
 4. year: Year if mentioned - IMPORTANT for disambiguation (null if not)
 5. isTV: Whether this appears to be a TV show (has seasons/episodes) vs a movie
+6. isBoxSet: Whether this appears to be a box set or complete series collection
+7. suggestedSearches: Alternative search queries if the primary might not find matches
+8. clarificationNeeded: If disc is mentioned but season is not, set this to "Season not specified but disc mentioned - for multi-disc-per-season sets, disc number ≠ season number"
+9. confidence: How confident you are in the extraction (0.0 to 1.0)
 
 ## Critical Rules
 - searchQuery should be CLEAN - only the actual title that TMDB would recognize
@@ -76,16 +90,17 @@ Given a user's input (which may include extra words), extract:
 - If user mentions a year (e.g., "Avatar 2009"), extract it separately - don't include in searchQuery
 - "s01", "s1", "season 1" all mean season: 1
 - "d1", "disc 1", "disk 1" all mean disc: 1
+- IMPORTANT: disc number does NOT equal season number - many box sets have multiple discs per season!
 
 ## Examples
-- "ed, edd n eddy the complete series disc 3" → searchQuery: "Ed, Edd n Eddy", isTV: true, disc: 3
-- "Avatar 2009" → searchQuery: "Avatar", year: 2009, isTV: false
-- "avatar the last airbender" → searchQuery: "Avatar: The Last Airbender", isTV: true
-- "The Office US season 3 disc 2" → searchQuery: "The Office US", isTV: true, season: 3, disc: 2
-- "breaking bad s04" → searchQuery: "Breaking Bad", isTV: true, season: 4
-- "lord of the rings extended edition" → searchQuery: "The Lord of the Rings", isTV: false
-- "friends complete box set" → searchQuery: "Friends", isTV: true
-- "game of thrones GOT s8" → searchQuery: "Game of Thrones", isTV: true, season: 8`;
+- "ed, edd n eddy the complete series disc 3" → searchQuery: "Ed, Edd n Eddy", isTV: true, disc: 3, isBoxSet: true, clarificationNeeded: "Season not specified..."
+- "Avatar 2009" → searchQuery: "Avatar", year: 2009, isTV: false, isBoxSet: false
+- "avatar the last airbender" → searchQuery: "Avatar: The Last Airbender", isTV: true, isBoxSet: false
+- "The Office US season 3 disc 2" → searchQuery: "The Office US", isTV: true, season: 3, disc: 2, isBoxSet: false, clarificationNeeded: null
+- "breaking bad s04" → searchQuery: "Breaking Bad", isTV: true, season: 4, isBoxSet: false
+- "lord of the rings extended edition" → searchQuery: "The Lord of the Rings", isTV: false, isBoxSet: false
+- "friends complete box set" → searchQuery: "Friends", isTV: true, isBoxSet: true
+- "game of thrones GOT s8" → searchQuery: "Game of Thrones", isTV: true, season: 8, isBoxSet: false`;
 
     const response = await openai.chat.completions.parse({
         model: 'gpt-4o-mini',
@@ -164,11 +179,24 @@ async function main() {
         console.log('  ├─────────────────────────────────────────────────────────┤');
         console.log(`  │ Search Query: "${extracted.searchQuery}"`);
         console.log(`  │ Is TV Show:   ${extracted.isTV}`);
+        console.log(`  │ Is Box Set:   ${extracted.isBoxSet || false}`);
         console.log(`  │ Season:       ${extracted.season || 'not specified'}`);
         console.log(`  │ Disc:         ${extracted.disc || 'not specified'}`);
         console.log(`  │ Year:         ${extracted.year || 'not specified'}`);
+        console.log(`  │ Confidence:   ${((extracted.confidence || 0) * 100).toFixed(0)}%`);
         console.log('  ├─────────────────────────────────────────────────────────┤');
         console.log(`  │ Reasoning: ${extracted.reasoning}`);
+        if (extracted.clarificationNeeded) {
+            console.log('  ├─────────────────────────────────────────────────────────┤');
+            console.log(`  │ ⚠️  Clarification Needed: ${extracted.clarificationNeeded}`);
+        }
+        if (extracted.suggestedSearches && extracted.suggestedSearches.length > 0) {
+            console.log('  ├─────────────────────────────────────────────────────────┤');
+            console.log('  │ 🔄 Suggested Alternative Searches:');
+            extracted.suggestedSearches.forEach((s, i) => {
+                console.log(`  │    ${i + 1}. "${s.query}" (${s.reason})`);
+            });
+        }
         console.log('  └─────────────────────────────────────────────────────────┘\n');
     } catch (error) {
         console.error(`  ❌ AI extraction failed: ${error.message}\n`);

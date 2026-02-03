@@ -421,6 +421,124 @@ function testTrackOutsideRange() {
 }
 
 // ============================================================================
+// MEDIA TYPE GUESSING TESTS
+// ============================================================================
+
+console.log('━━━ Media Type Guessing Tests ━━━\n');
+
+/**
+ * guessMediaType - enhanced version that uses track durations
+ * (Copied from juiceit.js for testing)
+ */
+function guessMediaType(numTitles, trackDurations = null) {
+    if (trackDurations && Object.keys(trackDurations).length > 0) {
+        const durations = Object.values(trackDurations).filter(d => d > 0);
+
+        if (durations.length === 0) {
+            return numTitles >= 3 ? 'tv' : 'movie';
+        }
+
+        const maxDuration = Math.max(...durations);
+        const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+        const longTracks = durations.filter(d => d >= 60);
+        if (longTracks.length === 1 && numTitles <= 3) {
+            return 'movie';
+        }
+
+        const episodeLengthTracks = durations.filter(d => d >= 8 && d <= 65);
+        if (episodeLengthTracks.length >= 3) {
+            const variance = Math.max(...episodeLengthTracks) - Math.min(...episodeLengthTracks);
+            const varianceRatio = variance / avgDuration;
+
+            if (varianceRatio < 0.5 && avgDuration >= 8 && avgDuration <= 65) {
+                return 'tv';
+            }
+        }
+
+        if (maxDuration >= 75) {
+            return 'movie';
+        }
+    }
+
+    return numTitles >= 3 ? 'tv' : 'movie';
+}
+
+function testGuessMediaTypeMovieWithExtras() {
+    console.log('Test: Movie with extras (1 long track + 2 short) should be movie');
+
+    // Movie feature (120 min) + 2 extras (5 min each)
+    const trackDurations = { 1: 120, 2: 5, 3: 5 };
+    const result = guessMediaType(3, trackDurations);
+
+    assert.strictEqual(result, 'movie', 'Should detect as movie despite 3 titles');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testGuessMediaTypeTVShow() {
+    console.log('Test: Multiple similar-length episodes should be TV');
+
+    // 6 episodes around 22 minutes each
+    const trackDurations = { 1: 22, 2: 23, 3: 21, 4: 22, 5: 24, 6: 22 };
+    const result = guessMediaType(6, trackDurations);
+
+    assert.strictEqual(result, 'tv', 'Should detect as TV show with consistent episode lengths');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testGuessMediaTypeShortFormTV() {
+    console.log('Test: Short-form TV (10 min episodes) should be TV');
+
+    // 8 episodes around 10 minutes each (like Ed, Edd n Eddy)
+    const trackDurations = { 1: 11, 2: 11, 3: 10, 4: 11, 5: 10, 6: 11, 7: 10, 8: 11 };
+    const result = guessMediaType(8, trackDurations);
+
+    assert.strictEqual(result, 'tv', 'Should detect short-form as TV');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testGuessMediaTypeFallbackNoTracks() {
+    console.log('Test: Falls back to count-based when no track durations');
+
+    // No track durations provided
+    const result1 = guessMediaType(2, null);
+    const result2 = guessMediaType(5, null);
+
+    assert.strictEqual(result1, 'movie', 'Should fallback: 2 titles = movie');
+    assert.strictEqual(result2, 'tv', 'Should fallback: 5 titles = tv');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testGuessMediaTypeLongMovie() {
+    console.log('Test: Long single movie (75+ min) should be movie');
+
+    // Single 90-minute movie
+    const trackDurations = { 1: 90 };
+    const result = guessMediaType(1, trackDurations);
+
+    assert.strictEqual(result, 'movie', 'Should detect 90 min single track as movie');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testGuessMediaTypeAmbiguous() {
+    console.log('Test: Ambiguous case falls back to count-based');
+
+    // 4 tracks with wildly varying durations (not consistent episodes)
+    const trackDurations = { 1: 5, 2: 30, 3: 45, 4: 60 };
+    const result = guessMediaType(4, trackDurations);
+
+    // With 4 titles and no clear pattern, should fall back to count-based (4 >= 3 = tv)
+    assert.strictEqual(result, 'tv', 'Ambiguous case should fallback to count-based');
+
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
 // RUN ALL TESTS
 // ============================================================================
 
@@ -452,6 +570,14 @@ try {
     // Track Candidate Logic Tests
     testTrackCandidateIdentification();
     testTrackOutsideRange();
+
+    // Media Type Guessing Tests
+    testGuessMediaTypeMovieWithExtras();
+    testGuessMediaTypeTVShow();
+    testGuessMediaTypeShortFormTV();
+    testGuessMediaTypeFallbackNoTracks();
+    testGuessMediaTypeLongMovie();
+    testGuessMediaTypeAmbiguous();
 
     console.log('━'.repeat(60));
     console.log('  ✅ All runtime analysis tests passed!');

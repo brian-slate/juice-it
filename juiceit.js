@@ -155,6 +155,83 @@ async function getTVSeasonDetails(tvId, seasonNumber) {
     }
 }
 
+// Get TV show overview (number of seasons, total episodes, etc.)
+// Useful for box sets to understand disc→season mapping
+async function getTVShowDetails(tvId) {
+    try {
+        const response = await axios.get(`https://api.themoviedb.org/3/tv/${tvId}`, {
+            params: {
+                api_key: TMDB_API_KEY,
+                language: 'en-US'
+            }
+        });
+        const data = response.data;
+        return {
+            id: data.id,
+            name: data.name,
+            numberOfSeasons: data.number_of_seasons,
+            numberOfEpisodes: data.number_of_episodes,
+            seasons: data.seasons?.map(s => ({
+                seasonNumber: s.season_number,
+                episodeCount: s.episode_count,
+                name: s.name
+            })) || [],
+            firstAirDate: data.first_air_date
+        };
+    } catch (error) {
+        logger.debug(`Error fetching TV show details: ${error.message}`);
+        return null;
+    }
+}
+
+// Multi-query TMDB search with fallback to alternative searches
+async function multiQueryTMDBSearch(extractedInfo) {
+    const { searchQuery, year, isTV, suggestedSearches } = extractedInfo;
+    let allMovieResults = [];
+    let allTVResults = [];
+
+    // Primary search
+    logger.debug(`[Multi-Query] Primary search: "${searchQuery}"`);
+    const primaryMovies = await searchTMDB(searchQuery, false, year);
+    const primaryTV = await searchTMDB(searchQuery, true, year);
+
+    allMovieResults = [...primaryMovies];
+    allTVResults = [...primaryTV];
+
+    // If primary search has few results and we have suggested alternatives, try them
+    const needsAlternatives = (isTV && primaryTV.length < 3) || (!isTV && primaryMovies.length < 3);
+
+    if (needsAlternatives && suggestedSearches?.length > 0) {
+        logger.debug(`[Multi-Query] Primary search has few results, trying ${suggestedSearches.length} alternatives...`);
+
+        for (const alt of suggestedSearches.slice(0, 2)) { // Limit to 2 alternatives
+            logger.debug(`[Multi-Query] Alternative search: "${alt.query}" (${alt.reason})`);
+
+            const altMovies = await searchTMDB(alt.query, false, year);
+            const altTV = await searchTMDB(alt.query, true, year);
+
+            // Add unique results (by ID)
+            const existingMovieIds = new Set(allMovieResults.map(m => m.id));
+            const existingTVIds = new Set(allTVResults.map(t => t.id));
+
+            for (const movie of altMovies) {
+                if (!existingMovieIds.has(movie.id)) {
+                    allMovieResults.push(movie);
+                }
+            }
+            for (const tv of altTV) {
+                if (!existingTVIds.has(tv.id)) {
+                    allTVResults.push(tv);
+                }
+            }
+        }
+
+        logger.debug(`[Multi-Query] Combined results: ${allMovieResults.length} movies, ${allTVResults.length} TV shows`);
+    }
+
+    return { movieResults: allMovieResults, tvResults: allTVResults };
+}
+
 // Validate TMDB API key
 async function validateTmdbApiKey(apiKey) {
     try {
@@ -327,6 +404,10 @@ Given a user's input (which may include extra words), extract:
 3. disc: Disc number if mentioned (null if not)
 4. year: Year if mentioned - IMPORTANT for disambiguation (null if not)
 5. isTV: Whether this appears to be a TV show (has seasons/episodes) vs a movie
+6. isBoxSet: Whether this appears to be a box set or complete series collection (mentions "complete series", "box set", "collection", etc.)
+7. suggestedSearches: Alternative search queries if the primary might not find matches (e.g., different spellings, without subtitle)
+8. clarificationNeeded: If disc is mentioned but season is not, set this to "Season not specified but disc mentioned - for multi-disc-per-season sets, disc number ≠ season number"
+9. confidence: How confident you are in the extraction (0.0 to 1.0)
 
 ## Critical Rules
 - searchQuery should be CLEAN - only the actual title that TMDB would recognize
@@ -335,16 +416,17 @@ Given a user's input (which may include extra words), extract:
 - If user mentions a year (e.g., "Avatar 2009"), extract it separately - don't include in searchQuery
 - "s01", "s1", "season 1" all mean season: 1
 - "d1", "disc 1", "disk 1" all mean disc: 1
+- IMPORTANT: disc number does NOT equal season number - many box sets have multiple discs per season!
 
 ## Examples
-- "ed, edd n eddy the complete series disc 3" → searchQuery: "Ed, Edd n Eddy", isTV: true, disc: 3
-- "Avatar 2009" → searchQuery: "Avatar", year: 2009, isTV: false
-- "avatar the last airbender" → searchQuery: "Avatar: The Last Airbender", isTV: true
-- "The Office US season 3 disc 2" → searchQuery: "The Office US", isTV: true, season: 3, disc: 2
-- "breaking bad s04" → searchQuery: "Breaking Bad", isTV: true, season: 4
-- "lord of the rings extended edition" → searchQuery: "The Lord of the Rings", isTV: false
-- "friends complete box set" → searchQuery: "Friends", isTV: true
-- "game of thrones GOT s8" → searchQuery: "Game of Thrones", isTV: true, season: 8`;
+- "ed, edd n eddy the complete series disc 3" → searchQuery: "Ed, Edd n Eddy", isTV: true, disc: 3, isBoxSet: true, clarificationNeeded: "Season not specified but disc mentioned..."
+- "Avatar 2009" → searchQuery: "Avatar", year: 2009, isTV: false, isBoxSet: false
+- "avatar the last airbender" → searchQuery: "Avatar: The Last Airbender", isTV: true, isBoxSet: false
+- "The Office US season 3 disc 2" → searchQuery: "The Office US", isTV: true, season: 3, disc: 2, isBoxSet: false, clarificationNeeded: null
+- "breaking bad s04" → searchQuery: "Breaking Bad", isTV: true, season: 4, isBoxSet: false
+- "lord of the rings extended edition" → searchQuery: "The Lord of the Rings", isTV: false, isBoxSet: false, suggestedSearches: [{query: "Lord of the Rings", reason: "without 'The'"}]
+- "friends complete box set" → searchQuery: "Friends", isTV: true, isBoxSet: true
+- "game of thrones GOT s8" → searchQuery: "Game of Thrones", isTV: true, season: 8, isBoxSet: false`;
 
         const userPrompt = `Extract the TMDB search information from this user query: "${userQuery}"`;
 
@@ -354,7 +436,13 @@ Given a user's input (which may include extra words), extract:
         });
 
         if (result) {
-            logger.debug(`[AI] Extracted: "${result.searchQuery}" (season: ${result.season}, disc: ${result.disc}, year: ${result.year})`);
+            logger.debug(`[AI] Extracted: "${result.searchQuery}" (season: ${result.season}, disc: ${result.disc}, year: ${result.year}, isBoxSet: ${result.isBoxSet}, confidence: ${result.confidence})`);
+            if (result.clarificationNeeded) {
+                logger.debug(`[AI] Clarification needed: ${result.clarificationNeeded}`);
+            }
+            if (result.suggestedSearches?.length) {
+                logger.debug(`[AI] Suggested searches: ${result.suggestedSearches.map(s => s.query).join(', ')}`);
+            }
             log(`AI query extraction: ${JSON.stringify(result)}`);
         }
 
@@ -366,7 +454,7 @@ Given a user's input (which may include extra words), extract:
 }
 
 // AI-powered TMDB match selection
-async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, userQuery = null) {
+async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, userQuery = null, extractedInfo = null, lsdvdMetadata = null) {
     try {
         if (!options.diagnose) {
             console.log('\n🤖 Using AI to analyze disc and select best match...');
@@ -376,12 +464,21 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
         if (userQuery) {
             logger.debug(`[AI] User query: "${userQuery}"`);
         }
+        if (extractedInfo) {
+            logger.debug(`[AI] Extracted info: ${JSON.stringify(extractedInfo)}`);
+        }
+        if (lsdvdMetadata) {
+            logger.debug(`[AI] lsdvd disc title: ${lsdvdMetadata.discTitle || 'unknown'}`);
+        }
         logger.debug(`[AI] Track durations: ${JSON.stringify(trackDurations)}`);
         logger.debug(`[AI] TMDB results: ${movieResults.length} movies, ${tvResults.length} TV shows`);
         log('AI: Starting TMDB match selection');
         log(`AI: Disc - ${volumeName} with ${numTitles} tracks`);
         if (userQuery) {
             log(`AI: User query - "${userQuery}"`);
+        }
+        if (extractedInfo) {
+            log(`AI: Extracted info - ${JSON.stringify(extractedInfo)}`);
         }
         log(`AI: Track durations - ${JSON.stringify(trackDurations)}`);
         log(`AI: TMDB results - ${movieResults.length} movies, ${tvResults.length} TV shows`);
@@ -393,7 +490,9 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
             trackDurations,
             movieResults,
             tvResults,
-            userQuery
+            userQuery,
+            extractedInfo,
+            lsdvdMetadata
         });
 
         // Call OpenAI with structured output validation
@@ -476,10 +575,10 @@ function analyzeEpisodeRuntimes(episodes) {
 }
 
 // AI-powered track mapping (Option C: Raw data + soft guidance)
-async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null, unrippableTracks = []) {
+async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null, unrippableTracks = [], discNumber = null) {
     try {
         console.log('\n🤖 Using AI to map tracks to episodes...');
-        logger.debug('[AI] Starting track mapping (Option C: raw data + soft guidance)');
+        logger.debug(`[AI] Starting track mapping (Option C: raw data + soft guidance)${discNumber ? `, disc ${discNumber}` : ''}`);
         logger.debug(`[AI] Track count: ${Object.keys(trackDurations).length}`);
         logger.debug(`[AI] Content type: ${metadata.type}`);
         logger.debug(`[AI] Episodes available: ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
@@ -503,7 +602,8 @@ async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null, unrip
             trackDurations,
             runtimeAnalysis,
             lsdvdMetadata,
-            unrippableTracks
+            unrippableTracks,
+            discNumber
         });
 
         // Call OpenAI with structured output validation
@@ -678,13 +778,66 @@ async function runSetup() {
     }
 }
 
-function guessMediaType(numTitles) {
-    // If there are multiple titles (usually 2+), it's likely a TV show
+/**
+ * Guess media type based on disc characteristics
+ *
+ * This function uses heuristics when AI extraction isn't available.
+ * When track durations are provided, it makes a smarter determination.
+ *
+ * @param {number} numTitles - Number of titles on the disc
+ * @param {Object|null} trackDurations - Optional map of track numbers to durations (minutes)
+ * @returns {'tv'|'movie'} - Best guess at media type
+ */
+function guessMediaType(numTitles, trackDurations = null) {
+    // If we have track durations, use smarter heuristics
+    if (trackDurations && Object.keys(trackDurations).length > 0) {
+        const durations = Object.values(trackDurations).filter(d => d > 0);
+
+        if (durations.length === 0) {
+            // No valid durations, fall back to count-based guess
+            return numTitles >= 3 ? 'tv' : 'movie';
+        }
+
+        const maxDuration = Math.max(...durations);
+        const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+        // Movie indicators:
+        // - Has exactly one track over 60 minutes (feature film)
+        // - Total tracks <= 3 (feature + maybe 1-2 extras)
+        const longTracks = durations.filter(d => d >= 60);
+        if (longTracks.length === 1 && numTitles <= 3) {
+            return 'movie';
+        }
+
+        // TV indicators:
+        // - Multiple tracks with similar durations (within 30% of each other)
+        // - Average duration between 10-50 minutes (typical episode length)
+        // - More than 3 tracks that are NOT very short (< 5 min = likely menus/extras)
+        const episodeLengthTracks = durations.filter(d => d >= 8 && d <= 65);
+        if (episodeLengthTracks.length >= 3) {
+            // Check if tracks have similar durations (TV episodes tend to be consistent)
+            const variance = Math.max(...episodeLengthTracks) - Math.min(...episodeLengthTracks);
+            const varianceRatio = variance / avgDuration;
+
+            // If variance is less than 50% of average, likely TV episodes
+            if (varianceRatio < 0.5 && avgDuration >= 8 && avgDuration <= 65) {
+                return 'tv';
+            }
+        }
+
+        // If longest track is movie-length (75+ minutes), assume movie with extras
+        if (maxDuration >= 75) {
+            return 'movie';
+        }
+    }
+
+    // Fallback: simple count-based guess
     // Movies typically have 1-2 titles (feature + extras)
+    // TV shows typically have 3+ titles (episodes)
     return numTitles >= 3 ? 'tv' : 'movie';
 }
 
-async function lookupMetadata(volumeName, numTitles, trackDurations = null, searchOptions = {}) {
+async function lookupMetadata(volumeName, numTitles, trackDurations = null, searchOptions = {}, lsdvdMetadata = null) {
     console.log('\n🔍 Looking up metadata...');
 
     // Use provided search title or clean up the volume name for searching
@@ -705,8 +858,36 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             if (extractedInfo.season) {
                 console.log(`   Detected season: ${extractedInfo.season}`);
             }
+            if (extractedInfo.disc) {
+                console.log(`   Detected disc: ${extractedInfo.disc}`);
+            }
             if (extractedInfo.year) {
                 console.log(`   Detected year: ${extractedInfo.year}`);
+            }
+
+            // Season clarification: if disc is specified without season for TV content
+            if (extractedInfo.disc && !extractedInfo.season && extractedInfo.isTV) {
+                console.log(`\n   ⚠️  You specified disc ${extractedInfo.disc} but not which season.`);
+                console.log('   For multi-disc-per-season box sets, disc number ≠ season number.\n');
+
+                try {
+                    const seasonPrompt = new Input({
+                        message: 'Which season is this disc from? (press Enter to skip)',
+                        initial: ''
+                    });
+                    const seasonInput = await seasonPrompt.run();
+
+                    if (seasonInput && seasonInput.trim()) {
+                        const parsedSeason = parseInt(seasonInput.trim(), 10);
+                        if (!isNaN(parsedSeason) && parsedSeason > 0) {
+                            extractedInfo.season = parsedSeason;
+                            console.log(`   ✓ Using season ${parsedSeason}\n`);
+                        }
+                    }
+                } catch (e) {
+                    // User cancelled or input error - continue without season
+                    logger.debug(`Season clarification prompt cancelled: ${e.message}`);
+                }
             }
         } else {
             // Fallback to regex-based cleanup if AI fails or not available
@@ -734,18 +915,28 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             .replace(/DISC\s*\d+$/i, '')   // Remove "DISC 1", "DISC1" at end
             .trim();
     }
-    const mediaType = extractedInfo?.isTV ? 'tv' : guessMediaType(numTitles);
+    const mediaType = extractedInfo?.isTV ? 'tv' : guessMediaType(numTitles, trackDurations);
     const searchYear = extractedInfo?.year || null;
+    const isBoxSet = extractedInfo?.isBoxSet || false;
 
-    log(`Searching for: "${cleanName}" (guessing type: ${mediaType}${searchYear ? `, year: ${searchYear}` : ''})`);
+    log(`Searching for: "${cleanName}" (guessing type: ${mediaType}${searchYear ? `, year: ${searchYear}` : ''}${isBoxSet ? ', box set' : ''})`);
 
-    // Search both movie and TV (pass year if we have it for better disambiguation)
-    const movieResults = await searchTMDB(cleanName, false, searchYear);
-    const tvResults = await searchTMDB(cleanName, true, searchYear);
+    // Use multi-query search if we have AI extraction with suggested alternatives
+    let movieResults, tvResults;
+    if (extractedInfo && extractedInfo.suggestedSearches?.length > 0) {
+        console.log('   Searching TMDB (with fallback queries)...');
+        const searchResults = await multiQueryTMDBSearch(extractedInfo);
+        movieResults = searchResults.movieResults;
+        tvResults = searchResults.tvResults;
+    } else {
+        // Standard single-query search
+        movieResults = await searchTMDB(cleanName, false, searchYear);
+        tvResults = await searchTMDB(cleanName, true, searchYear);
+    }
     
     // Try AI-powered selection if available and we have track durations
     if (config.openaiApiKey && trackDurations) {
-        const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, searchOptions.searchQuery);
+        const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, searchOptions.searchQuery, extractedInfo, lsdvdMetadata);
 
         if (aiSelection && aiSelection.selectedId) {
             const selectedResult = aiSelection.selectedType === 'tv'
@@ -759,10 +950,43 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             if (selectedResult && shouldAutoSelect) {
                 const confidenceStr = aiSelection.confidence >= 0.8 ? '' : ` (${(aiSelection.confidence * 100).toFixed(0)}% confidence)`;
                 if (aiSelection.selectedType === 'tv') {
-                    // Use season from: AI extraction season > AI extraction disc (for box sets) > AI selection > default 1
-                    const season = extractedInfo?.season || extractedInfo?.disc || aiSelection.season || 1;
-                    const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
+                    // Use season from: AI extraction season > AI selection > default 1
+                    // NOTE: disc number is NOT used as season - multi-disc-per-season sets break this assumption
+                    let season = extractedInfo?.season || aiSelection.season || 1;
                     const showYear = selectedResult.first_air_date ? selectedResult.first_air_date.split('-')[0] : null;
+
+                    // For box sets without explicit season, show season picker with episode counts
+                    if (isBoxSet && !extractedInfo?.season) {
+                        const showDetails = await getTVShowDetails(selectedResult.id);
+                        if (showDetails && showDetails.numberOfSeasons > 1) {
+                            console.log(`\n   📦 Box set detected: ${selectedResult.name}`);
+                            console.log(`   This show has ${showDetails.numberOfSeasons} seasons:`);
+
+                            // Build season choices with episode counts
+                            const seasonChoices = showDetails.seasons
+                                .filter(s => s.seasonNumber > 0) // Exclude "specials" (season 0)
+                                .map(s => ({
+                                    name: `Season ${s.seasonNumber} (${s.episodeCount} episodes)`,
+                                    value: s.seasonNumber
+                                }));
+
+                            if (seasonChoices.length > 1) {
+                                try {
+                                    const seasonSelect = new Select({
+                                        message: 'Which season is this disc from?',
+                                        choices: seasonChoices
+                                    });
+                                    season = await seasonSelect.run();
+                                    console.log(`   ✓ Using Season ${season}\n`);
+                                } catch (e) {
+                                    logger.debug(`Season selection cancelled: ${e.message}`);
+                                    // Default to season 1 if cancelled
+                                }
+                            }
+                        }
+                    }
+
+                    const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
                     console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}${confidenceStr}`);
                     return {
                         type: 'tv',
@@ -771,7 +995,8 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                         year: showYear,
                         season: season,
                         episodes: seasonDetails ? seasonDetails.episodes : null,
-                        aiSelected: true
+                        aiSelected: true,
+                        discNumber: extractedInfo?.disc || null
                     };
                 } else {
                     console.log(`\n   ✨ AI auto-selected: ${selectedResult.title}${confidenceStr}`);
@@ -819,7 +1044,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
 
                     if (choice === 'accept' && selectedResult) {
                         if (aiSelection.selectedType === 'tv') {
-                            const season = extractedInfo?.season || extractedInfo?.disc || aiSelection.season || 1;
+                            const season = extractedInfo?.season || aiSelection.season || 1;
                             const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
                             const showYear = selectedResult.first_air_date ? selectedResult.first_air_date.split('-')[0] : null;
                             console.log(`\n   ✓ Accepted: ${selectedResult.name} - Season ${season}\n`);
@@ -829,7 +1054,8 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                                 name: selectedResult.name,
                                 year: showYear,
                                 season: season,
-                                episodes: seasonDetails ? seasonDetails.episodes : null
+                                episodes: seasonDetails ? seasonDetails.episodes : null,
+                                discNumber: extractedInfo?.disc || null
                             };
                         } else {
                             console.log(`\n   ✓ Accepted: ${selectedResult.title}\n`);
@@ -898,7 +1124,8 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                 name: show.name,
                 year: showYear,
                 season: 1,
-                episodes: seasonDetails ? seasonDetails.episodes : null
+                episodes: seasonDetails ? seasonDetails.episodes : null,
+                discNumber: extractedInfo?.disc || null
             };
         } else if (movieResults.length > 0) {
             const movie = movieResults[0];
@@ -1138,7 +1365,8 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                     name: newSelected.data.name,
                     year: showYear,
                     season: season,
-                    episodes: seasonDetails ? seasonDetails.episodes : null
+                    episodes: seasonDetails ? seasonDetails.episodes : null,
+                    discNumber: null
                 };
             } else {
                 return {
@@ -1180,7 +1408,8 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                 name: selected.data.name,
                 year: showYear,
                 season: season,
-                episodes: seasonDetails ? seasonDetails.episodes : null
+                episodes: seasonDetails ? seasonDetails.episodes : null,
+                discNumber: extractedInfo?.disc || null
             };
         } else {
             return {
@@ -1202,7 +1431,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
  * Guided metadata selection for naked invocations (juice-it with no arguments)
  * Shows disc info, searches TMDB, and presents an interactive menu
  */
-async function guidedMetadataSelection(volumeName, numTitles, _trackDurations) {
+async function guidedMetadataSelection(volumeName, numTitles, trackDurations) {
     // Clean up volume name for initial search
     const cleanName = volumeName
         .replace(/_/g, ' ')
@@ -1210,7 +1439,7 @@ async function guidedMetadataSelection(volumeName, numTitles, _trackDurations) {
         .replace(/DISC\s*\d+$/i, '')
         .trim();
 
-    const mediaType = guessMediaType(numTitles);
+    const mediaType = guessMediaType(numTitles, trackDurations);
 
     console.log('\n🔍 Searching TMDB...');
     log(`Guided selection: searching for "${cleanName}" (guessing type: ${mediaType})`);
@@ -1348,7 +1577,8 @@ async function guidedMetadataSelection(volumeName, numTitles, _trackDurations) {
                     name: show.name,
                     year: showYear,
                     season: season,
-                    episodes: seasonDetails ? seasonDetails.episodes : null
+                    episodes: seasonDetails ? seasonDetails.episodes : null,
+                    discNumber: null  // Guided selection doesn't track disc number
                 };
             }
 
@@ -3093,7 +3323,17 @@ async function ripAllTracks() {
             log('No titles found on disc');
             return;
         }
-        
+
+        // Get lsdvd metadata early for context in AI decisions
+        // This provides disc title, chapter counts, and track details that help with TMDB selection
+        let lsdvdMetadata = null;
+        if (!options.rawMode) {
+            lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
+            if (options.verbose && lsdvdMetadata) {
+                console.log('[lsdvd] Extended metadata collected for AI context');
+            }
+        }
+
         // Lookup metadata unless disabled (pass track durations for AI)
         let metadata = null;
         if (options.rawMode) {
@@ -3121,7 +3361,7 @@ async function ripAllTracks() {
                 // User provided query or --interactive: existing behavior
                 metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations, {
                     searchQuery: options.searchQuery
-                });
+                }, lsdvdMetadata);
                 if (!metadata) {
                     console.log('\n  Selection cancelled.\n');
                     return;
@@ -3274,18 +3514,14 @@ async function ripAllTracks() {
             let useSequentialMapping = false;
 
             if (config.openaiApiKey && global.dvdTitleDurations && metadata.type === 'tv') {
-                // Collect lsdvd metadata for additional context (Option C)
-                const lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
-                if (options.verbose && lsdvdMetadata) {
-                    console.log('[lsdvd] Extended metadata collected');
-                }
+                // Note: lsdvdMetadata was already retrieved earlier for TMDB selection context
 
                 // Attempt AI mapping with retry loop on failure
                 let retryAttempt = 0;
                 const maxAutoRetries = 2; // Auto-retry up to 2 times in automatic mode
 
                 while (!aiMappingResult && !useSequentialMapping) {
-                    aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata, global.unrippableTracks || []);
+                    aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata, global.unrippableTracks || [], metadata.discNumber);
 
                     if (!aiMappingResult) {
                         log('ERROR: AI mapping failed');
@@ -3861,6 +4097,9 @@ async function runDiagnosticMode() {
     console.log(`  Volume Name: ${volumeName}`);
     console.log('');
 
+    // Get lsdvd metadata early for use in TMDB selection and track mapping
+    const lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SECTION 2: DISC SCAN - TRACK INFORMATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -3884,21 +4123,71 @@ async function runDiagnosticMode() {
         return;
     }
 
-    // Use provided search title or clean volume name for search
-    // Use same logic as main flow (lookupMetadata) for consistency
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 3A: AI QUERY EXTRACTION (NEW)
+    // ═══════════════════════════════════════════════════════════════════════════
     let cleanName;
-    if (options.searchQuery) {
-        cleanName = options.searchQuery.trim();
-        console.log(`  Search Query: "${cleanName}" (from command line)`);
+    let extractedInfo = null;
+    const rawQuery = options.searchQuery || volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').replace(/DISC\s*\d+$/i, '').trim();
+
+    console.log(`  Raw Query: "${rawQuery}"`);
+
+    // Run AI query extraction if OpenAI is configured
+    if (config.openaiApiKey) {
+        console.log('  ⏳ Running AI query extraction...');
+        extractedInfo = await aiExtractSearchQuery(rawQuery);
+
+        if (extractedInfo) {
+            console.log('  ✓ AI extraction complete\n');
+            console.log('  ┌─────────────────────────────────────────────────────────┐');
+            console.log('  │ AI Query Extraction Results                             │');
+            console.log('  ├─────────────────────────────────────────────────────────┤');
+            console.log(`  │ Clean Query:  "${extractedInfo.searchQuery}"`);
+            console.log(`  │ Is TV Show:   ${extractedInfo.isTV}`);
+            console.log(`  │ Is Box Set:   ${extractedInfo.isBoxSet || false}`);
+            console.log(`  │ Season:       ${extractedInfo.season || 'not specified'}`);
+            console.log(`  │ Disc:         ${extractedInfo.disc || 'not specified'}`);
+            console.log(`  │ Year:         ${extractedInfo.year || 'not specified'}`);
+            console.log(`  │ Confidence:   ${((extractedInfo.confidence || 0) * 100).toFixed(0)}%`);
+            if (extractedInfo.clarificationNeeded) {
+                console.log('  ├─────────────────────────────────────────────────────────┤');
+                console.log(`  │ ⚠️  ${extractedInfo.clarificationNeeded}`);
+            }
+            if (extractedInfo.suggestedSearches?.length > 0) {
+                console.log('  ├─────────────────────────────────────────────────────────┤');
+                console.log('  │ Suggested Alternative Searches:');
+                extractedInfo.suggestedSearches.forEach((s, i) => {
+                    console.log(`  │   ${i + 1}. "${s.query}" (${s.reason})`);
+                });
+            }
+            console.log('  └─────────────────────────────────────────────────────────┘');
+            console.log('');
+
+            cleanName = extractedInfo.searchQuery;
+        } else {
+            console.log('  ⚠️  AI extraction failed, using raw query');
+            cleanName = rawQuery;
+        }
     } else {
-        cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').replace(/DISC\s*\d+$/i, '').trim();
-        console.log(`  Search Query: "${cleanName}" (derived from volume name)`);
+        cleanName = rawQuery;
+        console.log('  (No OpenAI key - skipping AI query extraction)');
     }
+
+    console.log(`  Search Query for TMDB: "${cleanName}"`);
     console.log('');
 
-    // Fetch movie and TV results using shared searchTMDB function
-    const movieResults = await searchTMDB(cleanName, false);
-    const tvResults = await searchTMDB(cleanName, true);
+    // Fetch movie and TV results using multi-query search if we have extraction info
+    let movieResults, tvResults;
+    if (extractedInfo && extractedInfo.suggestedSearches?.length > 0) {
+        console.log('  ⏳ Running multi-query TMDB search (with alternatives)...');
+        const searchResults = await multiQueryTMDBSearch(extractedInfo);
+        movieResults = searchResults.movieResults;
+        tvResults = searchResults.tvResults;
+    } else {
+        const searchYear = extractedInfo?.year || null;
+        movieResults = await searchTMDB(cleanName, false, searchYear);
+        tvResults = await searchTMDB(cleanName, true, searchYear);
+    }
 
     console.log(`  TMDB Results: ${movieResults.length} movies, ${tvResults.length} TV shows`);
     console.log('');
@@ -3937,13 +4226,16 @@ async function runDiagnosticMode() {
     console.log(`    Structured Output: ${aiConfig.useStructuredOutput ? 'Yes' : 'No'}`);
     console.log('');
 
-    // Build and show full prompts
+    // Build and show full prompts (include extractedInfo and lsdvdMetadata for full context)
     const tmdbPrompts = buildTmdbMatchPrompts({
         volumeName,
         numTitles,
         trackDurations,
         movieResults,
-        tvResults
+        tvResults,
+        userQuery: rawQuery,
+        extractedInfo,
+        lsdvdMetadata
     });
 
     if (aiConfig.diagnosticShowFullPrompts) {
@@ -3959,8 +4251,8 @@ async function runDiagnosticMode() {
         console.log('');
     }
 
-    // Use shared aiSelectTmdbMatch() function
-    const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults);
+    // Use shared aiSelectTmdbMatch() function (pass full context including extractedInfo and lsdvdMetadata)
+    const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, rawQuery, extractedInfo, lsdvdMetadata);
 
     if (!aiSelection) {
         console.log('  ❌ AI selection failed');
@@ -3988,16 +4280,19 @@ async function runDiagnosticMode() {
     console.log('');
 
     // Get full metadata from search results + season details
+    // Use extracted season (from user query) over AI-guessed season
+    const season = extractedInfo?.season || aiSelection.season || 1;
     let metadata;
     if (aiSelection.selectedType === 'tv') {
         const selectedShow = tvResults.find(s => s.id === aiSelection.selectedId);
-        const seasonDetails = await getTVSeasonDetails(aiSelection.selectedId, aiSelection.season || 1);
+        const seasonDetails = await getTVSeasonDetails(aiSelection.selectedId, season);
         metadata = {
             type: 'tv',
             tmdbId: aiSelection.selectedId,
             name: selectedShow?.name || 'Unknown',
-            season: aiSelection.season || 1,
-            episodes: seasonDetails?.episodes || []
+            season: season,
+            episodes: seasonDetails?.episodes || [],
+            discNumber: extractedInfo?.disc || null
         };
     } else {
         const selectedMovie = movieResults.find(m => m.id === aiSelection.selectedId);
@@ -4056,7 +4351,7 @@ async function runDiagnosticMode() {
     // ═══════════════════════════════════════════════════════════════════════════
     printDiagnosticSection('💿 SECTION 5.5: EXTENDED DISC METADATA (lsdvd)');
 
-    const lsdvdMetadata = getLsdvdMetadata(options.dvdSource);
+    // lsdvdMetadata was already retrieved early in the function
 
     if (lsdvdMetadata) {
         console.log(`  Disc Title: ${lsdvdMetadata.discTitle}`);
@@ -4100,7 +4395,8 @@ async function runDiagnosticMode() {
         metadata,
         trackDurations,
         runtimeAnalysis,
-        lsdvdMetadata
+        lsdvdMetadata,
+        discNumber: metadata.discNumber
     });
 
     if (aiConfig.diagnosticShowFullPrompts) {
@@ -4117,7 +4413,7 @@ async function runDiagnosticMode() {
     }
 
     // Use shared aiMapTracks() function with lsdvd metadata
-    const aiMappingResult = await aiMapTracks(trackDurations, metadata, lsdvdMetadata, global.unrippableTracks || []);
+    const aiMappingResult = await aiMapTracks(trackDurations, metadata, lsdvdMetadata, global.unrippableTracks || [], metadata.discNumber);
 
     if (!aiMappingResult) {
         console.log('  ❌ AI mapping failed');

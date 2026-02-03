@@ -7,6 +7,12 @@
 
 const { z } = require('zod');
 
+// Schema for suggested alternative searches
+const SuggestedSearchSchema = z.object({
+    query: z.string().describe('Alternative search query to try'),
+    reason: z.string().describe('Why this alternative might help (e.g., "alternate spelling", "without subtitle")')
+});
+
 // Schema for query extraction (cleaning user input before TMDB search)
 const QueryExtractionSchema = z.object({
     searchQuery: z.string().describe('The cleaned title to search TMDB (just the show/movie name, no extra words)'),
@@ -14,6 +20,10 @@ const QueryExtractionSchema = z.object({
     disc: z.number().nullable().describe('Disc number if mentioned by user, or null'),
     year: z.number().nullable().describe('Year if mentioned by user (e.g., "Avatar 2009"), or null'),
     isTV: z.boolean().describe('Whether this appears to be a TV show (vs movie)'),
+    isBoxSet: z.boolean().describe('Whether this appears to be a box set or complete series collection'),
+    suggestedSearches: z.array(SuggestedSearchSchema).nullable().describe('Alternative search queries to try if primary fails, or null if not needed'),
+    clarificationNeeded: z.string().nullable().describe('What clarification is needed from the user (e.g., "Season not specified but disc mentioned"), or null'),
+    confidence: z.number().min(0).max(1).describe('Confidence in the extraction accuracy'),
     reasoning: z.string().describe('Brief explanation of extraction')
 });
 
@@ -70,6 +80,7 @@ const TrackMappingResponseSchema = z.object({
 
 module.exports = {
     VALID_EXTRA_TYPES,
+    SuggestedSearchSchema,
     QueryExtractionSchema,
     TmdbMatchSchema,
     TrackMappingSchema,

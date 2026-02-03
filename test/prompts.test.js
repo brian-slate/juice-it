@@ -23,7 +23,9 @@ const {
     TrackMappingSchema,
     RuntimeAnalysisSchema,
     MappingSummarySchema,
-    TrackMappingResponseSchema
+    TrackMappingResponseSchema,
+    QueryExtractionSchema,
+    SuggestedSearchSchema
 } = require('../prompts/schemas');
 
 // Test directories
@@ -787,6 +789,439 @@ function testOptionCNoPreLabeling() {
 }
 
 // ============================================================================
+// MULTI-DISC CONTEXT TESTS
+// ============================================================================
+
+function testMultiDiscContextIncluded() {
+    console.log('Test: Multi-disc context included for Disc 2+');
+    setup();
+
+    const metadata = {
+        name: 'Ed, Edd n Eddy',
+        season: 1,
+        episodes: Array.from({ length: 26 }, (_, i) => ({
+            episode_number: i + 1,
+            name: `Episode ${i + 1}`,
+            runtime: 11
+        }))
+    };
+
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 136, 2: 22, 3: 22 },
+        runtimeAnalysis: { min: 11, max: 11, avg: 11, variance: 0, tolerance: 2, format: 'short-form' },
+        lsdvdMetadata: null,
+        discNumber: 2  // Disc 2 - should trigger multi-disc context
+    });
+
+    // Should include multi-disc context section
+    assert.strictEqual(prompts.user.includes('Multi-Disc Context'), true, 'Should include Multi-Disc Context section');
+    assert.strictEqual(prompts.user.includes('This is Disc 2'), true, 'Should mention this is Disc 2');
+    assert.strictEqual(prompts.user.includes('**NOT** start from Episode 1'), true, 'Should warn not to start from episode 1');
+    assert.strictEqual(prompts.user.includes('episodeIndex=14'), true, 'Should provide example with offset');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMultiDiscContextNotIncludedForDisc1() {
+    console.log('Test: Multi-disc context NOT included for Disc 1');
+    setup();
+
+    const metadata = {
+        name: 'Test Show',
+        season: 1,
+        episodes: [{ episode_number: 1, name: 'Episode 1', runtime: 22 }]
+    };
+
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22 },
+        runtimeAnalysis: { min: 22, max: 22, avg: 22, variance: 0, tolerance: 2, format: 'half-hour' },
+        lsdvdMetadata: null,
+        discNumber: 1  // Disc 1 - should NOT have offset warning
+    });
+
+    // Should NOT include "NOT start from Episode 1" warning for Disc 1
+    assert.strictEqual(prompts.user.includes('**NOT** start from Episode 1'), false, 'Should NOT warn about episode offset for Disc 1');
+    // Should still mention it's Disc 1
+    assert.strictEqual(prompts.user.includes('This is Disc 1'), true, 'Should mention this is Disc 1');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
+// QUERY EXTRACTION SCHEMA TESTS
+// ============================================================================
+
+function testQueryExtractionSchemaValid() {
+    console.log('Test: QueryExtractionSchema validates correct data');
+    setup();
+
+    const validData = {
+        searchQuery: 'Ed, Edd n Eddy',
+        season: 1,
+        disc: 2,
+        year: 1999,
+        isTV: true,
+        isBoxSet: true,
+        suggestedSearches: null,
+        clarificationNeeded: null,
+        confidence: 0.95,
+        reasoning: 'Extracted title with season and disc numbers'
+    };
+
+    const result = QueryExtractionSchema.safeParse(validData);
+    assert.strictEqual(result.success, true, 'Should validate correct QueryExtraction data');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testQueryExtractionSchemaWithSuggestedSearches() {
+    console.log('Test: QueryExtractionSchema validates data with suggestedSearches');
+    setup();
+
+    const dataWithSuggestions = {
+        searchQuery: 'The Lord of the Rings',
+        season: null,
+        disc: null,
+        year: null,
+        isTV: false,
+        isBoxSet: false,
+        suggestedSearches: [
+            { query: 'Lord of the Rings', reason: 'without "The"' },
+            { query: 'LOTR', reason: 'common abbreviation' }
+        ],
+        clarificationNeeded: null,
+        confidence: 0.8,
+        reasoning: 'Movie title extracted, provided alternatives for better search'
+    };
+
+    const result = QueryExtractionSchema.safeParse(dataWithSuggestions);
+    assert.strictEqual(result.success, true, 'Should validate QueryExtraction with suggestedSearches');
+    assert.strictEqual(result.data.suggestedSearches.length, 2, 'Should have 2 suggested searches');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testQueryExtractionSchemaConfidenceBounds() {
+    console.log('Test: QueryExtractionSchema validates confidence boundary values');
+    setup();
+
+    const zeroConfidence = {
+        searchQuery: 'Unknown Show',
+        season: null,
+        disc: null,
+        year: null,
+        isTV: false,
+        isBoxSet: false,
+        suggestedSearches: null,
+        clarificationNeeded: 'Cannot determine if TV show or movie',
+        confidence: 0.0,
+        reasoning: 'Ambiguous query with low confidence'
+    };
+
+    const fullConfidence = {
+        searchQuery: 'Breaking Bad',
+        season: 5,
+        disc: null,
+        year: 2008,
+        isTV: true,
+        isBoxSet: false,
+        suggestedSearches: null,
+        clarificationNeeded: null,
+        confidence: 1.0,
+        reasoning: 'Well-known show with explicit season number'
+    };
+
+    const resultZero = QueryExtractionSchema.safeParse(zeroConfidence);
+    const resultFull = QueryExtractionSchema.safeParse(fullConfidence);
+
+    assert.strictEqual(resultZero.success, true, 'Confidence 0.0 should be valid');
+    assert.strictEqual(resultFull.success, true, 'Confidence 1.0 should be valid');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testQueryExtractionSchemaWithClarification() {
+    console.log('Test: QueryExtractionSchema validates clarificationNeeded field');
+    setup();
+
+    const needsClarification = {
+        searchQuery: 'The Office',
+        season: null,
+        disc: 1,
+        year: null,
+        isTV: true,
+        isBoxSet: true,
+        suggestedSearches: [
+            { query: 'The Office US', reason: 'US version' },
+            { query: 'The Office UK', reason: 'UK original' }
+        ],
+        clarificationNeeded: 'US or UK version? Also, disc specified but no season - which season is this disc from?',
+        confidence: 0.6,
+        reasoning: 'Title is ambiguous between US/UK versions, disc without season needs clarification'
+    };
+
+    const result = QueryExtractionSchema.safeParse(needsClarification);
+    assert.strictEqual(result.success, true, 'Should validate QueryExtraction with clarificationNeeded');
+    assert.strictEqual(result.data.clarificationNeeded !== null, true, 'Should have clarificationNeeded');
+    assert.strictEqual(result.data.clarificationNeeded.includes('US or UK'), true, 'Should contain clarification question');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testSuggestedSearchSchemaValid() {
+    console.log('Test: SuggestedSearchSchema validates standalone');
+    setup();
+
+    const validSuggestion = {
+        query: 'Avatar: The Way of Water',
+        reason: 'Full title with subtitle'
+    };
+
+    const result = SuggestedSearchSchema.safeParse(validSuggestion);
+    assert.strictEqual(result.success, true, 'Should validate correct SuggestedSearch data');
+    assert.strictEqual(result.data.query, 'Avatar: The Way of Water', 'Query should be preserved');
+    assert.strictEqual(result.data.reason, 'Full title with subtitle', 'Reason should be preserved');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMultiDiscContextForDisc3Plus() {
+    console.log('Test: Multi-disc context for Disc 3+ calculates different episode range');
+    setup();
+
+    const metadata = {
+        name: 'Long Running Show',
+        season: 1,
+        episodes: Array.from({ length: 50 }, (_, i) => ({
+            episode_number: i + 1,
+            name: `Episode ${i + 1}`,
+            runtime: 22
+        }))
+    };
+
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22, 2: 22, 3: 22 },
+        runtimeAnalysis: { min: 22, max: 22, avg: 22, variance: 0, tolerance: 2, format: 'half-hour' },
+        lsdvdMetadata: null,
+        discNumber: 3  // Disc 3
+    });
+
+    // Should include multi-disc context for Disc 3
+    assert.strictEqual(prompts.user.includes('This is Disc 3'), true, 'Should mention this is Disc 3');
+    assert.strictEqual(prompts.user.includes('**NOT** start from Episode 1'), true, 'Should warn not to start from episode 1');
+    // Episode range should be different from Disc 2
+    assert.strictEqual(prompts.user.includes('episodeIndex'), true, 'Should include episodeIndex guidance');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMultiDiscContextNullDiscNumber() {
+    console.log('Test: Multi-disc context absent when discNumber is null');
+    setup();
+
+    const metadata = {
+        name: 'Test Show',
+        season: 1,
+        episodes: [{ episode_number: 1, name: 'Episode 1', runtime: 22 }]
+    };
+
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22 },
+        runtimeAnalysis: { min: 22, max: 22, avg: 22, variance: 0, tolerance: 2, format: 'half-hour' },
+        lsdvdMetadata: null,
+        discNumber: null  // No disc number
+    });
+
+    // Should NOT include multi-disc context when discNumber is null
+    assert.strictEqual(prompts.user.includes('Multi-Disc Context'), false, 'Should NOT include Multi-Disc Context when null');
+    assert.strictEqual(prompts.user.includes('This is Disc'), false, 'Should NOT mention disc number');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
+// TMDB SELECTION CONTEXT TESTS
+// ============================================================================
+
+function testTmdbMatchPromptsWithExtractedInfo() {
+    console.log('Test: buildTmdbMatchPrompts includes extractedInfo context');
+    setup();
+
+    const extractedInfo = {
+        searchQuery: 'Breaking Bad',
+        season: 3,
+        disc: 1,
+        year: 2008,
+        isTV: true,
+        isBoxSet: false,
+        suggestedSearches: null,
+        clarificationNeeded: null,
+        confidence: 0.95,
+        reasoning: 'Clear TV show query'
+    };
+
+    const prompts = buildTmdbMatchPrompts({
+        volumeName: 'BREAKING_BAD_S3_D1',
+        numTitles: 8,
+        trackDurations: [45, 47, 48, 46, 47, 45, 46, 48],
+        movieResults: [],
+        tvResults: [{ id: 1396, name: 'Breaking Bad', first_air_date: '2008-01-20', overview: 'A high school chemistry teacher...' }],
+        userQuery: 'Breaking Bad season 3',
+        extractedInfo
+    });
+
+    // Should include extracted info section
+    assert.strictEqual(prompts.user.includes('Pre-Parsed Query Information'), true, 'Should include Pre-Parsed section');
+    assert.strictEqual(prompts.user.includes('Breaking Bad'), true, 'Should include extracted title');
+    assert.strictEqual(prompts.user.includes('Season**: 3'), true, 'Should include extracted season');
+    assert.strictEqual(prompts.user.includes('TV Show'), true, 'Should indicate TV media type');
+    assert.strictEqual(prompts.user.includes('95%'), true, 'Should include confidence percentage');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTmdbMatchPromptsWithLsdvdMetadata() {
+    console.log('Test: buildTmdbMatchPrompts includes lsdvd metadata context');
+    setup();
+
+    const lsdvdMetadata = {
+        discTitle: 'BREAKING_BAD_SEASON_3',
+        discId: 'abc123xyz',
+        longestTrack: 1,
+        tracks: {
+            1: { chapters: 5, audioStreams: 2, subpictures: 1 },
+            2: { chapters: 4, audioStreams: 2, subpictures: 1 },
+            3: { chapters: 3, audioStreams: 2, subpictures: 1 }
+        }
+    };
+
+    const prompts = buildTmdbMatchPrompts({
+        volumeName: 'DVD_VOLUME',
+        numTitles: 3,
+        trackDurations: [45, 47, 48],
+        movieResults: [],
+        tvResults: [],
+        lsdvdMetadata
+    });
+
+    // Should include lsdvd metadata section
+    assert.strictEqual(prompts.user.includes('Disc Title (from lsdvd)'), true, 'Should include lsdvd disc title label');
+    assert.strictEqual(prompts.user.includes('BREAKING_BAD_SEASON_3'), true, 'Should include disc title value');
+    assert.strictEqual(prompts.user.includes('abc123xyz'), true, 'Should include disc ID');
+    assert.strictEqual(prompts.user.includes('chapters'), true, 'Should include chapter counts');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTmdbMatchPromptsWithBoxSetFlag() {
+    console.log('Test: buildTmdbMatchPrompts shows box set detection');
+    setup();
+
+    const extractedInfo = {
+        searchQuery: 'Ed, Edd n Eddy',
+        season: 1,
+        disc: 2,
+        year: null,
+        isTV: true,
+        isBoxSet: true,  // Box set detected
+        suggestedSearches: null,
+        clarificationNeeded: null,
+        confidence: 0.9,
+        reasoning: 'TV show with disc number indicates box set'
+    };
+
+    const prompts = buildTmdbMatchPrompts({
+        volumeName: 'EENE_S1_D2',
+        numTitles: 12,
+        trackDurations: [22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22],
+        movieResults: [],
+        tvResults: [{ id: 3123, name: 'Ed, Edd n Eddy', first_air_date: '1999-01-04', overview: 'Three best friends...' }],
+        extractedInfo
+    });
+
+    // Should include box set flag
+    assert.strictEqual(prompts.user.includes('Box Set'), true, 'Should indicate box set detection');
+    assert.strictEqual(prompts.user.includes('multi-disc'), true, 'Should mention multi-disc');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTmdbMatchPromptsWithClarificationNeeded() {
+    console.log('Test: buildTmdbMatchPrompts shows clarification needed');
+    setup();
+
+    const extractedInfo = {
+        searchQuery: 'The Office',
+        season: null,
+        disc: 1,
+        year: null,
+        isTV: true,
+        isBoxSet: true,
+        suggestedSearches: [
+            { query: 'The Office US', reason: 'US version' },
+            { query: 'The Office UK', reason: 'UK version' }
+        ],
+        clarificationNeeded: 'US or UK version? Which season?',
+        confidence: 0.5,
+        reasoning: 'Ambiguous title'
+    };
+
+    const prompts = buildTmdbMatchPrompts({
+        volumeName: 'THE_OFFICE_D1',
+        numTitles: 6,
+        trackDurations: [22, 22, 22, 22, 22, 22],
+        movieResults: [],
+        tvResults: [],
+        extractedInfo
+    });
+
+    // Should include clarification needed
+    assert.strictEqual(prompts.user.includes('Clarification Needed'), true, 'Should show clarification needed label');
+    assert.strictEqual(prompts.user.includes('US or UK'), true, 'Should include the clarification question');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTmdbMatchPromptsDefaultsWithoutContext() {
+    console.log('Test: buildTmdbMatchPrompts shows defaults when no context provided');
+    setup();
+
+    const prompts = buildTmdbMatchPrompts({
+        volumeName: 'UNKNOWN_DISC',
+        numTitles: 1,
+        trackDurations: [120],
+        movieResults: [],
+        tvResults: []
+        // No userQuery, extractedInfo, or lsdvdMetadata
+    });
+
+    // Should show default messages
+    assert.strictEqual(prompts.user.includes('No user query provided'), true, 'Should indicate no user query');
+    assert.strictEqual(prompts.user.includes('No pre-parsed query information'), true, 'Should indicate no extracted info');
+    assert.strictEqual(prompts.user.includes('Extended disc metadata not available'), true, 'Should indicate no lsdvd');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
 // RUN ALL TESTS
 // ============================================================================
 
@@ -829,6 +1264,28 @@ try {
 
     // Extra Type Tests (Play All, etc.)
     testTrackMappingPromptContainsExtraTypeGuidance();
+
+    // Multi-Disc Context Tests
+    testMultiDiscContextIncluded();
+    testMultiDiscContextNotIncludedForDisc1();
+
+    // QueryExtractionSchema Tests
+    testQueryExtractionSchemaValid();
+    testQueryExtractionSchemaWithSuggestedSearches();
+    testQueryExtractionSchemaConfidenceBounds();
+    testQueryExtractionSchemaWithClarification();
+    testSuggestedSearchSchemaValid();
+
+    // Additional Multi-Disc Context Tests
+    testMultiDiscContextForDisc3Plus();
+    testMultiDiscContextNullDiscNumber();
+
+    // TMDB Selection Context Tests
+    testTmdbMatchPromptsWithExtractedInfo();
+    testTmdbMatchPromptsWithLsdvdMetadata();
+    testTmdbMatchPromptsWithBoxSetFlag();
+    testTmdbMatchPromptsWithClarificationNeeded();
+    testTmdbMatchPromptsDefaultsWithoutContext();
 
     console.log('━'.repeat(60));
     console.log('  ✅ All prompt/schema tests passed!');

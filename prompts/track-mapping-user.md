@@ -26,6 +26,8 @@ Map DVD tracks to episodes using the information below.
 
 {{unrippableInfo}}
 
+{{discContext}}
+
 ---
 
 ## SECTION 2: COMPUTATIONAL ANALYSIS (For Context Only)
