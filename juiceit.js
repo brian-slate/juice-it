@@ -310,11 +310,7 @@ async function callOpenAI(systemMessage, userMessage, opts = {}) {
         // Show clean progress indicator (update once per second)
         process.stdout.write('   ⏳ Waiting for AI');
         const progressInterval = setInterval(() => {
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
             process.stdout.write('.');
-            if (elapsed === aiConfig.slowResponseWarningSeconds) {
-                process.stdout.write(' (taking longer than expected)');
-            }
         }, 1000);
 
         let result;
@@ -3752,15 +3748,17 @@ async function ripAllTracks() {
                 const aiMapping = aiMappingResult.mappings.find(m => m.trackNum === titleNumber);
                 if (aiMapping) {
                     if (aiMapping.shouldSkip) {
-                        if (options.mainOnly) {
-                            // --main-only mode: skip extras
+                        const extraType = aiMapping.extraType || 'featurette';
+                        const extraDescription = aiMapping.extraDescription || null;
+
+                        // Always skip 'other' type (Play All, compilations) - they're redundant, not bonus content
+                        // Also skip if --main-only mode
+                        if (extraType === 'other' || options.mainOnly) {
                             status = 'skip';
-                            proposedName = '(will skip - extra)';
-                            aiReasoning = aiMapping.reasoning + ' (--main-only mode)';
+                            proposedName = '(will skip - ' + (extraDescription || extraType) + ')';
+                            aiReasoning = aiMapping.reasoning + (options.mainOnly ? ' (--main-only mode)' : ' (redundant compilation)');
                         } else {
-                            // Rip extras with AI-specified type (or default to 'featurette')
-                            const extraType = aiMapping.extraType || 'featurette';
-                            const extraDescription = aiMapping.extraDescription || null;
+                            // Rip real extras (featurettes, deleted scenes, etc.) as bonus content
                             proposedName = buildExtrasFileName(baseFileName, titleNumber, extraType, extraDescription);
                             aiReasoning = aiMapping.reasoning + ' (ripping as bonus content)';
                         }
