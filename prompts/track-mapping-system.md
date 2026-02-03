@@ -52,3 +52,9 @@ When a disc is "Disc 1" of a series, it typically contains only the FIRST portio
 ## Response Requirements
 
 You must respond with valid JSON matching the specified schema. Include detailed reasoning for each track decision.
+
+**IMPORTANT**: For any track where `shouldSkip: true`, you MUST also include:
+- `extraType`: The type of extra (e.g., "other" for Play All, "featurette" for bonus content)
+- `extraDescription`: A brief label (e.g., "Play All", "Menu", "Bonus Feature")
+
+These fields are required for proper Plex/Jellyfin file naming.

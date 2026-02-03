@@ -66,6 +66,10 @@ For each track, provide:
   - `episodeIndex`: 0-based index of the first episode
   - `episodeEndIndex`: (optional) 0-based index of the last episode if this track contains multiple episodes
   - Example: Track with episodes 1-2 would have episodeIndex=0, episodeEndIndex=1
+- **If skipped, classify the extra type** (IMPORTANT for proper file naming):
+  - `extraType`: One of "other", "featurette", "behindthescenes", "deleted", "interview", "trailer", "short", "scene"
+  - `extraDescription`: Brief label like "Play All", "Menu", "Bonus Feature"
+  - For Play All compilation tracks: use `extraType: "other"`, `extraDescription: "Play All"`
 - Your confidence level (0.0 to 1.0)
 - Brief reasoning for your decision
 
