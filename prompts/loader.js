@@ -360,11 +360,15 @@ function buildMappingValidationPrompts({
         extractedContext = parts.join('\n');
     }
 
-    // Calculate mapped episode range
+    // Calculate mapped episode range and build detailed track mapping info
     let mappedEpisodeRange = 'N/A';
     let mappedEpisodeCount = 0;
+    let trackMappingDetails = 'No detailed mapping data available.';
+
     if (mappingResults && mappingResults.mappings) {
         const episodeIndices = new Set();
+        const detailLines = [];
+
         for (const mapping of mappingResults.mappings) {
             if (mapping.episodeIndex !== null && mapping.episodeIndex !== undefined && !mapping.shouldSkip) {
                 episodeIndices.add(mapping.episodeIndex);
@@ -374,7 +378,32 @@ function buildMappingValidationPrompts({
                     }
                 }
             }
+
+            // Build detail line for this track
+            const trackNum = mapping.trackNum;
+            const duration = mapping.trackDuration || '?';
+            const confidence = mapping.confidence !== undefined ? `${Math.round(mapping.confidence * 100)}%` : '?';
+
+            if (mapping.shouldSkip) {
+                const skipReason = mapping.extraType || 'skipped';
+                const desc = mapping.extraDescription || '';
+                detailLines.push(`| ${trackNum} | ${duration} min | SKIP (${skipReason}${desc ? ': ' + desc : ''}) | ${confidence} |`);
+            } else if (mapping.episodeIndex !== null && mapping.episodeIndex !== undefined) {
+                const epStart = mapping.episodeIndex + 1; // 1-based
+                const epEnd = mapping.episodeEndIndex !== null && mapping.episodeEndIndex !== undefined
+                    ? mapping.episodeEndIndex + 1
+                    : epStart;
+                const epRange = epStart === epEnd ? `E${epStart}` : `E${epStart}-E${epEnd}`;
+                detailLines.push(`| ${trackNum} | ${duration} min | ${epRange} | ${confidence} |`);
+            } else {
+                detailLines.push(`| ${trackNum} | ${duration} min | unmapped | ${confidence} |`);
+            }
         }
+
+        if (detailLines.length > 0) {
+            trackMappingDetails = `| Track | Duration | Mapping | Confidence |\n|-------|----------|---------|------------|\n${detailLines.join('\n')}`;
+        }
+
         if (episodeIndices.size > 0) {
             const sorted = Array.from(episodeIndices).sort((a, b) => a - b);
             const firstEp = sorted[0] + 1; // Convert to 1-based
@@ -399,7 +428,8 @@ function buildMappingValidationPrompts({
         mappedEpisodeRange,
         tracksMatched: mappingResults?.summary?.tracksMatched || 0,
         tracksSkipped: mappingResults?.summary?.tracksSkipped || 0,
-        overallConfidence: Math.round((mappingResults?.overallConfidence || 0) * 100)
+        overallConfidence: Math.round((mappingResults?.overallConfidence || 0) * 100),
+        trackMappingDetails
     });
 
     return { system, user };

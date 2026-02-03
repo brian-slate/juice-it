@@ -1,6 +1,6 @@
 # Mapping Validation - User Prompt
 
-Validate this episode mapping result and determine if it's correct.
+Validate this episode mapping result comprehensively. You are the sole decision-maker for what warnings the user sees.
 
 ---
 
@@ -30,27 +30,33 @@ Validate this episode mapping result and determine if it's correct.
 - **Season**: {{seasonNumber}}
 - **Total Episodes in Season**: {{totalEpisodes}}
 
-### 3B. Mapping Results
+### 3B. Mapping Summary
 - **Episodes Mapped**: {{mappedEpisodeCount}}
 - **Episode Range**: {{mappedEpisodeRange}}
 - **Tracks Matched**: {{tracksMatched}}
 - **Tracks Skipped**: {{tracksSkipped}}
 - **Overall Confidence**: {{overallConfidence}}%
 
+### 3C. Detailed Track Mappings
+{{trackMappingDetails}}
+
 ---
 
 ## SECTION 4: YOUR TASK
 
-Assess whether this mapping is correct and expected:
+Perform a comprehensive validation of this mapping:
 
-1. **Consider the context**: Is this a multi-disc set? Would partial season content be expected?
-2. **Check episode range**: Do the mapped episodes make sense for this disc?
-3. **Verify confidence**: Are the confidence scores acceptable?
-4. **Identify real problems**: Only flag genuine concerns, not expected multi-disc behavior
+1. **Episode Accuracy**: Do the episode numbers and range make sense?
+2. **Confidence Check**: Are any mappings suspiciously low confidence?
+3. **Content Match**: Does this match what the user requested?
+4. **Track Analysis**: Are the right tracks being included/skipped?
+5. **Multi-Disc Context**: If part of a set, is partial content expected?
 
-### Respond with:
-- Whether the mapping is valid
-- Any genuine concerns (empty array if none)
-- A brief summary for the user
-- What content you'd expect on this disc
-- Your reasoning
+### Produce your assessment:
+- `isValid`: Is the overall mapping correct?
+- `concerns`: Array of any problems found (with severity: error/warning/info)
+- `summary`: Brief user-friendly summary
+- `expectedOnDisc`: What content you'd expect (e.g., "Episodes 15-26 of Season 2")
+- `reasoning`: Your detailed analysis
+
+**Important**: You decide what warnings the user sees. If everything looks good, return an empty concerns array.

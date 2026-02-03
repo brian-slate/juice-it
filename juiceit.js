@@ -3831,61 +3831,51 @@ async function ripAllTracks() {
         }
 
             // AI-powered validation of episode mapping results (TV shows only)
-            if (metadata.type === 'tv' && metadata.episodes && aiMappingResult && aiMappingResult.mappings) {
-                const expectedEpisodes = metadata.episodes.length;
-                const mappedEpisodes = aiMappingResult.mappings.filter(m => !m.shouldSkip && m.episodeIndex !== null);
+            // Let AI be the sole decision-maker for what warnings to show
+            if (metadata.type === 'tv' && metadata.episodes && aiMappingResult && aiMappingResult.mappings && !options.interactive) {
+                // Build comprehensive extractedInfo for validation context
+                const validationExtractedInfo = {
+                    searchQuery: metadata.name,
+                    season: metadata.season,
+                    disc: metadata.discNumber || null,
+                    isTV: true,
+                    isBoxSet: metadata.discNumber ? true : false,
+                    confidence: 1.0 // We have confirmed metadata at this point
+                };
 
-                // Count total episodes covered, including multi-episode tracks
-                const coveredEpisodes = new Set();
-                for (const m of mappedEpisodes) {
-                    const startIdx = m.episodeIndex;
-                    const endIdx = m.episodeEndIndex !== undefined && m.episodeEndIndex !== null ? m.episodeEndIndex : startIdx;
-                    for (let i = startIdx; i <= endIdx; i++) {
-                        coveredEpisodes.add(i);
+                const validationResult = await aiValidateMappingResults({
+                    volumeName,
+                    numTitles,
+                    trackDurations: global.dvdTitleDurations,
+                    userQuery: options.searchQuery,
+                    extractedInfo: validationExtractedInfo,
+                    matchedTitle: metadata.name,
+                    matchedType: 'tv',
+                    seasonNumber: metadata.season,
+                    totalEpisodes: metadata.episodes.length,
+                    mappingResults: aiMappingResult
+                });
+
+                // AI determines all warnings - no procedural pre-filtering
+                if (validationResult) {
+                    logger.debug(`[AI] Mapping validation: isValid=${validationResult.isValid}`);
+                    logger.debug(`[AI] Summary: ${validationResult.summary}`);
+                    if (validationResult.expectedOnDisc) {
+                        logger.debug(`[AI] Expected on disc: ${validationResult.expectedOnDisc}`);
                     }
-                }
-                const totalMappedEpisodes = coveredEpisodes.size;
 
-                if (totalMappedEpisodes < expectedEpisodes) {
-                    logger.debug(`Episode count: ${totalMappedEpisodes}/${expectedEpisodes} mapped`);
-
-                    if (!options.interactive) {
-                        // Use AI to determine if this is a genuine concern or expected behavior
-                        const validationResult = await aiValidateMappingResults({
-                            volumeName,
-                            numTitles,
-                            trackDurations: global.dvdTitleDurations,
-                            userQuery: options.searchQuery,
-                            extractedInfo: metadata.discNumber ? { disc: metadata.discNumber, isBoxSet: true } : null,
-                            matchedTitle: metadata.name,
-                            matchedType: 'tv',
-                            seasonNumber: metadata.season,
-                            totalEpisodes: expectedEpisodes,
-                            mappingResults: aiMappingResult
-                        });
-
-                        // Only show warnings if AI identifies genuine concerns
-                        if (validationResult && !validationResult.isValid) {
-                            // AI found real issues - show warnings
-                            const errorConcerns = validationResult.concerns.filter(c => c.severity === 'error');
-                            const warningConcerns = validationResult.concerns.filter(c => c.severity === 'warning');
-
-                            if (errorConcerns.length > 0 || warningConcerns.length > 0) {
-                                global.autoModeWarnings = global.autoModeWarnings || [];
-                                for (const concern of [...errorConcerns, ...warningConcerns]) {
-                                    global.autoModeWarnings.push(concern.message);
-                                }
-                            }
-                        } else if (validationResult) {
-                            // AI says it's fine - log but don't warn user
-                            logger.debug(`[AI] Mapping validation: ${validationResult.summary}`);
-                            if (validationResult.expectedOnDisc) {
-                                logger.debug(`[AI] Expected on disc: ${validationResult.expectedOnDisc}`);
+                    // Add any concerns the AI identified as warnings/errors
+                    if (validationResult.concerns && validationResult.concerns.length > 0) {
+                        const actionableConcerns = validationResult.concerns.filter(
+                            c => c.severity === 'error' || c.severity === 'warning'
+                        );
+                        if (actionableConcerns.length > 0) {
+                            global.autoModeWarnings = global.autoModeWarnings || [];
+                            for (const concern of actionableConcerns) {
+                                global.autoModeWarnings.push(concern.message);
                             }
                         }
                     }
-                } else if (totalMappedEpisodes > expectedEpisodes) {
-                    logger.warn(`More episodes mapped (${totalMappedEpisodes}) than expected (${expectedEpisodes})`);
                 }
             }
         } // End of "if no plan loaded" block
