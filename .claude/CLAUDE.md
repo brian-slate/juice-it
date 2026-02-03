@@ -121,41 +121,14 @@ Key functions:
 
 ## Makefile Commands (IMPORTANT)
 
-**Always use the Makefile for development tasks.** Do NOT run scripts directly from `bin/` - the Makefile provides the correct interface.
+**Before running any development commands, check the Makefile first.** The Makefile is the canonical source for:
 
-Run `make help` to see all available commands:
+- **Testing** (running tests, specific test suites, query testing)
+- **Development setup** (installing dependencies, switching between local/Homebrew versions)
+- **Releasing** (patch, minor, major version releases)
+- **Diagnostics** (demo mode, diagnostic analysis)
 
-### Testing
-```bash
-make test              # Run all automated tests (use this, not npm test directly)
-make test-core         # Run core functionality tests only
-make test-prompts      # Run prompt/schema tests only
-make test-runtime      # Run runtime analysis tests only
-make test-openai       # Run OpenAI API integration tests only
-make test-query QUERY="Avatar 2009"  # Test AI query extraction for TMDB
-```
-
-### Development Setup
-```bash
-make install           # Install npm dependencies
-make use-local         # Use LOCAL source code (npm link) - for development
-make use-homebrew      # Switch back to HOMEBREW release version
-```
-
-### Releasing
-```bash
-make release           # Create patch release (1.2.3 → 1.2.4) - bug fixes
-make release-minor     # Create minor release (1.2.3 → 1.3.0) - new features
-make release-major     # Create major release (1.2.3 → 2.0.0) - breaking changes
-```
-
-### Diagnostics
-```bash
-make demo              # Run interactive mapping demo
-make diagnose          # Run diagnostic mode (analyze disc and mapping)
-```
-
-**When the user asks to "make a release" or "run tests" or similar dev tasks, always use the appropriate `make` command.**
+**Always run `make help` to see available commands** before running one-off shell commands or scripts directly. Do NOT run scripts from `bin/` directly - use the Makefile targets instead.
 
 ---
 
