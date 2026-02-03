@@ -4025,9 +4025,15 @@ async function ripAllTracks() {
         }
 
         console.log('━'.repeat(60));
-        const totalToRip = mappingsToRip.filter(m => m.status !== 'skip').length;
+        // Exclude both 'skip' (AI-mapped extras) and 'unrippable' (copy-protected) from count
+        const totalToRip = mappingsToRip.filter(m => m.status !== 'skip' && m.status !== 'unrippable').length;
+        const unrippableCount = mappingsToRip.filter(m => m.status === 'unrippable').length;
+
         if (successCount === totalToRip) {
             console.log('  ⚡ All tracks ripped successfully!');
+            if (unrippableCount > 0) {
+                console.log(`     (${unrippableCount} copy-protected track${unrippableCount > 1 ? 's were' : ' was'} not attempted)`);
+            }
         } else if (successCount > 0) {
             console.log(`  ⚡ Ripping complete: ${successCount} of ${totalToRip} tracks successful`);
             if (skippedTracks.length > 0) {
@@ -4036,6 +4042,9 @@ async function ripAllTracks() {
                 skippedTracks.forEach(({ track, reason }) => {
                     console.log(`     • Track ${track}: ${reason}`);
                 });
+            }
+            if (unrippableCount > 0) {
+                console.log(`     (${unrippableCount} copy-protected track${unrippableCount > 1 ? 's were' : ' was'} not attempted)`);
             }
         } else {
             console.log('  ✗ No tracks were successfully ripped');
