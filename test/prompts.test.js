@@ -15,7 +15,8 @@ const {
     interpolate,
     clearCache,
     buildTmdbMatchPrompts,
-    buildTrackMappingPrompts
+    buildTrackMappingPrompts,
+    buildMappingValidationPrompts
 } = require('../prompts/loader');
 
 const {
@@ -25,7 +26,9 @@ const {
     MappingSummarySchema,
     TrackMappingResponseSchema,
     QueryExtractionSchema,
-    SuggestedSearchSchema
+    SuggestedSearchSchema,
+    MappingConcernSchema,
+    MappingValidationSchema
 } = require('../prompts/schemas');
 
 // Test directories
@@ -1222,6 +1225,185 @@ function testTmdbMatchPromptsDefaultsWithoutContext() {
 }
 
 // ============================================================================
+// MAPPING VALIDATION SCHEMA TESTS
+// ============================================================================
+
+function testMappingConcernSchemaValid() {
+    console.log('Test: MappingConcernSchema validates correct data');
+    setup();
+
+    const validConcern = {
+        severity: 'warning',
+        message: 'Episode numbers may be incorrect',
+        suggestion: 'Verify episode titles match expected content'
+    };
+
+    const result = MappingConcernSchema.safeParse(validConcern);
+    assert.strictEqual(result.success, true, 'Valid concern should pass validation');
+
+    // Test with null suggestion
+    const concernWithNullSuggestion = {
+        severity: 'info',
+        message: 'This is informational',
+        suggestion: null
+    };
+    const nullResult = MappingConcernSchema.safeParse(concernWithNullSuggestion);
+    assert.strictEqual(nullResult.success, true, 'Concern with null suggestion should be valid');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMappingConcernSchemaSeverityValues() {
+    console.log('Test: MappingConcernSchema validates all severity levels');
+    setup();
+
+    const severities = ['info', 'warning', 'error'];
+    severities.forEach(severity => {
+        const concern = {
+            severity,
+            message: `Test ${severity}`,
+            suggestion: null
+        };
+        const result = MappingConcernSchema.safeParse(concern);
+        assert.strictEqual(result.success, true, `Severity "${severity}" should be valid`);
+    });
+
+    // Invalid severity should fail
+    const invalidConcern = {
+        severity: 'critical',
+        message: 'Test',
+        suggestion: null
+    };
+    const invalidResult = MappingConcernSchema.safeParse(invalidConcern);
+    assert.strictEqual(invalidResult.success, false, 'Invalid severity should fail');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMappingValidationSchemaValid() {
+    console.log('Test: MappingValidationSchema validates correct data');
+    setup();
+
+    const validValidation = {
+        isValid: true,
+        concerns: [],
+        summary: 'Mapping looks correct for a multi-disc set',
+        expectedOnDisc: 'Episodes 15-26 of Season 2',
+        reasoning: 'The disc contains the second half of Season 2, which is expected for Disc 4 of a box set.'
+    };
+
+    const result = MappingValidationSchema.safeParse(validValidation);
+    assert.strictEqual(result.success, true, 'Valid validation should pass');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMappingValidationSchemaWithConcerns() {
+    console.log('Test: MappingValidationSchema validates with concerns array');
+    setup();
+
+    const validationWithConcerns = {
+        isValid: false,
+        concerns: [
+            {
+                severity: 'error',
+                message: 'Episodes mapped to wrong season',
+                suggestion: 'Verify the correct season was selected'
+            },
+            {
+                severity: 'warning',
+                message: 'Low confidence on track 3',
+                suggestion: 'Review track 3 mapping manually'
+            }
+        ],
+        summary: 'Several issues detected with the mapping',
+        expectedOnDisc: null,
+        reasoning: 'The episode titles do not match the expected content for Season 2.'
+    };
+
+    const result = MappingValidationSchema.safeParse(validationWithConcerns);
+    assert.strictEqual(result.success, true, 'Validation with concerns should pass');
+    assert.strictEqual(result.data.concerns.length, 2, 'Should have 2 concerns');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testBuildMappingValidationPrompts() {
+    console.log('Test: buildMappingValidationPrompts creates valid prompts');
+    setup();
+
+    const prompts = buildMappingValidationPrompts({
+        volumeName: 'ED_EDD_N_EDDY_S2D3',
+        numTitles: 8,
+        trackDurations: { 1: 180, 2: 23, 3: 23, 4: 23, 5: 23, 6: 23, 7: 23, 8: 23 },
+        userQuery: 'Ed Edd n Eddy season 2 disc 3',
+        extractedInfo: {
+            searchQuery: 'Ed, Edd n Eddy',
+            season: 2,
+            disc: 3,
+            isTV: true,
+            isBoxSet: true,
+            confidence: 0.95
+        },
+        matchedTitle: 'Ed, Edd n Eddy',
+        matchedType: 'tv',
+        seasonNumber: 2,
+        totalEpisodes: 26,
+        mappingResults: {
+            mappings: [
+                { trackNum: 2, episodeIndex: 14, episodeEndIndex: 15, shouldSkip: false },
+                { trackNum: 3, episodeIndex: 16, episodeEndIndex: 17, shouldSkip: false }
+            ],
+            summary: { tracksMatched: 6, tracksSkipped: 2 },
+            overallConfidence: 0.92
+        }
+    });
+
+    // Verify system prompt exists
+    assert.ok(prompts.system.length > 0, 'System prompt should exist');
+    assert.strictEqual(prompts.system.includes('DVD expert'), true, 'System prompt should identify role');
+    assert.strictEqual(prompts.system.includes('Multi-Disc'), true, 'System prompt should mention multi-disc');
+
+    // Verify user prompt contains expected sections
+    assert.strictEqual(prompts.user.includes('Ed Edd n Eddy season 2 disc 3'), true, 'Should include user query');
+    assert.strictEqual(prompts.user.includes('Ed, Edd n Eddy'), true, 'Should include matched title');
+    assert.strictEqual(prompts.user.includes('26'), true, 'Should include total episodes');
+    assert.strictEqual(prompts.user.includes('Box Set'), true, 'Should indicate box set');
+    assert.strictEqual(prompts.user.includes('92%'), true, 'Should include overall confidence');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testBuildMappingValidationPromptsMinimal() {
+    console.log('Test: buildMappingValidationPrompts handles minimal data');
+    setup();
+
+    const prompts = buildMappingValidationPrompts({
+        volumeName: 'UNKNOWN_DISC',
+        numTitles: 1,
+        trackDurations: { 1: 100 },
+        matchedTitle: 'Movie Title',
+        matchedType: 'movie',
+        seasonNumber: null,
+        totalEpisodes: 0,
+        mappingResults: null
+        // No userQuery, extractedInfo
+    });
+
+    assert.ok(prompts.system.length > 0, 'System prompt should exist');
+    assert.ok(prompts.user.length > 0, 'User prompt should exist');
+    assert.strictEqual(prompts.user.includes('No user query provided'), true, 'Should show default query message');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
 // RUN ALL TESTS
 // ============================================================================
 
@@ -1286,6 +1468,14 @@ try {
     testTmdbMatchPromptsWithBoxSetFlag();
     testTmdbMatchPromptsWithClarificationNeeded();
     testTmdbMatchPromptsDefaultsWithoutContext();
+
+    // Mapping Validation Schema Tests
+    testMappingConcernSchemaValid();
+    testMappingConcernSchemaSeverityValues();
+    testMappingValidationSchemaValid();
+    testMappingValidationSchemaWithConcerns();
+    testBuildMappingValidationPrompts();
+    testBuildMappingValidationPromptsMinimal();
 
     console.log('━'.repeat(60));
     console.log('  ✅ All prompt/schema tests passed!');

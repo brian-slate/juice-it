@@ -31,8 +31,8 @@ const OpenAI = require('openai');
 const { zodResponseFormat } = require('openai/helpers/zod');
 
 // Prompt templates and schemas
-const { buildTmdbMatchPrompts, buildTrackMappingPrompts } = require('./prompts/loader');
-const { QueryExtractionSchema, TmdbMatchSchema, TrackMappingResponseSchema } = require('./prompts/schemas');
+const { buildTmdbMatchPrompts, buildTrackMappingPrompts, buildMappingValidationPrompts } = require('./prompts/loader');
+const { QueryExtractionSchema, TmdbMatchSchema, TrackMappingResponseSchema, MappingValidationSchema } = require('./prompts/schemas');
 
 // AI configuration
 const aiConfig = require('./config/ai-config');
@@ -515,6 +515,65 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
     } catch (error) {
         logger.debug(`AI selection error: ${error.message}`);
         return null;
+    }
+}
+
+// AI-powered validation of mapping results
+// Determines if warnings are truly needed or if the mapping is expected for multi-disc sets
+async function aiValidateMappingResults({
+    volumeName,
+    numTitles,
+    trackDurations,
+    userQuery = null,
+    extractedInfo = null,
+    matchedTitle,
+    matchedType,
+    seasonNumber,
+    totalEpisodes,
+    mappingResults
+}) {
+    try {
+        logger.debug('[AI] Starting mapping validation');
+        logger.debug(`[AI] Validating: ${matchedTitle} Season ${seasonNumber}`);
+        logger.debug(`[AI] Mapped ${mappingResults?.summary?.tracksMatched || 0} tracks`);
+        log('AI: Starting mapping validation');
+
+        // Build prompts from templates
+        const { system, user } = buildMappingValidationPrompts({
+            volumeName,
+            numTitles,
+            trackDurations,
+            userQuery,
+            extractedInfo,
+            matchedTitle,
+            matchedType,
+            seasonNumber,
+            totalEpisodes,
+            mappingResults
+        });
+
+        // Call OpenAI with structured output validation
+        const result = await callOpenAI(system, user, {
+            schema: MappingValidationSchema,
+            schemaName: 'mapping_validation'
+        });
+
+        if (result) {
+            logger.debug(`[AI] Validation result: isValid=${result.isValid}, concerns=${result.concerns.length}`);
+            log(`AI validation result: ${JSON.stringify(result)}`);
+        }
+
+        return result;
+    } catch (error) {
+        logger.debug(`[AI] Validation error: ${error.message}`);
+        // On error, return a permissive result (don't block the user)
+        return {
+            isValid: true,
+            concerns: [],
+            summary: 'Unable to validate (AI error) - proceeding with mapping',
+            expectedOnDisc: null,
+            reasoning: `Validation failed: ${error.message}`
+        };
     }
 }
 
@@ -3771,7 +3830,7 @@ async function ripAllTracks() {
             });
         }
 
-            // Check for episode mapping mismatches (TV shows only)
+            // AI-powered validation of episode mapping results (TV shows only)
             if (metadata.type === 'tv' && metadata.episodes && aiMappingResult && aiMappingResult.mappings) {
                 const expectedEpisodes = metadata.episodes.length;
                 const mappedEpisodes = aiMappingResult.mappings.filter(m => !m.shouldSkip && m.episodeIndex !== null);
@@ -3788,25 +3847,42 @@ async function ripAllTracks() {
                 const totalMappedEpisodes = coveredEpisodes.size;
 
                 if (totalMappedEpisodes < expectedEpisodes) {
-                    logger.warn(`Episode mismatch: ${totalMappedEpisodes}/${expectedEpisodes} episodes mapped`);
+                    logger.debug(`Episode count: ${totalMappedEpisodes}/${expectedEpisodes} mapped`);
 
                     if (!options.interactive) {
-                        // Auto mode: warn but continue
-                        console.log('');
-                        console.log('  ⚠️  Episode Mapping Mismatch');
-                        console.log('');
-                        console.log(`  TMDB shows ${expectedEpisodes} episodes for this season,`);
-                        console.log(`  but only ${totalMappedEpisodes} episodes were found on the disc.`);
-                        console.log('');
-                        console.log('  Possible causes:');
-                        console.log('    • This disc may only contain part of the season');
-                        console.log('    • AI may have selected the wrong TV show/season');
-                        console.log('    • TMDB may have incomplete data for this disc');
-                        console.log('');
-                        console.log('  Continuing with available mappings...');
-                        console.log('');
-                        global.autoModeWarnings = global.autoModeWarnings || [];
-                        global.autoModeWarnings.push(`Episode mismatch: only ${totalMappedEpisodes} of ${expectedEpisodes} episodes found`);
+                        // Use AI to determine if this is a genuine concern or expected behavior
+                        const validationResult = await aiValidateMappingResults({
+                            volumeName,
+                            numTitles,
+                            trackDurations: global.dvdTitleDurations,
+                            userQuery: options.searchQuery,
+                            extractedInfo: metadata.discNumber ? { disc: metadata.discNumber, isBoxSet: true } : null,
+                            matchedTitle: metadata.name,
+                            matchedType: 'tv',
+                            seasonNumber: metadata.season,
+                            totalEpisodes: expectedEpisodes,
+                            mappingResults: aiMappingResult
+                        });
+
+                        // Only show warnings if AI identifies genuine concerns
+                        if (validationResult && !validationResult.isValid) {
+                            // AI found real issues - show warnings
+                            const errorConcerns = validationResult.concerns.filter(c => c.severity === 'error');
+                            const warningConcerns = validationResult.concerns.filter(c => c.severity === 'warning');
+
+                            if (errorConcerns.length > 0 || warningConcerns.length > 0) {
+                                global.autoModeWarnings = global.autoModeWarnings || [];
+                                for (const concern of [...errorConcerns, ...warningConcerns]) {
+                                    global.autoModeWarnings.push(concern.message);
+                                }
+                            }
+                        } else if (validationResult) {
+                            // AI says it's fine - log but don't warn user
+                            logger.debug(`[AI] Mapping validation: ${validationResult.summary}`);
+                            if (validationResult.expectedOnDisc) {
+                                logger.debug(`[AI] Expected on disc: ${validationResult.expectedOnDisc}`);
+                            }
+                        }
                     }
                 } else if (totalMappedEpisodes > expectedEpisodes) {
                     logger.warn(`More episodes mapped (${totalMappedEpisodes}) than expected (${expectedEpisodes})`);

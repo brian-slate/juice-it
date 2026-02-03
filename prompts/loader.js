@@ -323,11 +323,94 @@ Example for Disc 2 of a 26-episode season:
     return { system, user };
 }
 
+/**
+ * Build the mapping validation prompts
+ * @param {Object} params - Parameters for the prompt
+ * @returns {{ system: string, user: string }} System and user prompts
+ */
+function buildMappingValidationPrompts({
+    volumeName,
+    numTitles,
+    trackDurations,
+    userQuery = null,
+    extractedInfo = null,
+    matchedTitle,
+    matchedType,
+    seasonNumber,
+    totalEpisodes,
+    mappingResults
+}) {
+    // Build user query context
+    let userQueryContext = 'No user query provided - matching based on disc volume name only.';
+    if (userQuery) {
+        userQueryContext = `**User's Search Query**: "${userQuery}"`;
+    }
+
+    // Build extracted info context
+    let extractedContext = 'No pre-parsed query information available.';
+    if (extractedInfo) {
+        const parts = [];
+        parts.push(`**Extracted Title**: "${extractedInfo.searchQuery}"`);
+        if (extractedInfo.season) parts.push(`**Season**: ${extractedInfo.season}`);
+        if (extractedInfo.disc) parts.push(`**Disc**: ${extractedInfo.disc}`);
+        if (extractedInfo.year) parts.push(`**Year**: ${extractedInfo.year}`);
+        parts.push(`**Media Type**: ${extractedInfo.isTV ? 'TV Show' : 'Movie/Unknown'}`);
+        if (extractedInfo.isBoxSet) parts.push(`**Box Set**: Yes (multi-disc set detected)`);
+        parts.push(`**Extraction Confidence**: ${(extractedInfo.confidence * 100).toFixed(0)}%`);
+        extractedContext = parts.join('\n');
+    }
+
+    // Calculate mapped episode range
+    let mappedEpisodeRange = 'N/A';
+    let mappedEpisodeCount = 0;
+    if (mappingResults && mappingResults.mappings) {
+        const episodeIndices = new Set();
+        for (const mapping of mappingResults.mappings) {
+            if (mapping.episodeIndex !== null && mapping.episodeIndex !== undefined && !mapping.shouldSkip) {
+                episodeIndices.add(mapping.episodeIndex);
+                if (mapping.episodeEndIndex !== null && mapping.episodeEndIndex !== undefined) {
+                    for (let i = mapping.episodeIndex; i <= mapping.episodeEndIndex; i++) {
+                        episodeIndices.add(i);
+                    }
+                }
+            }
+        }
+        if (episodeIndices.size > 0) {
+            const sorted = Array.from(episodeIndices).sort((a, b) => a - b);
+            const firstEp = sorted[0] + 1; // Convert to 1-based
+            const lastEp = sorted[sorted.length - 1] + 1;
+            mappedEpisodeRange = `Episodes ${firstEp}-${lastEp}`;
+            mappedEpisodeCount = episodeIndices.size;
+        }
+    }
+
+    const system = renderPrompt('mapping-validation-system', {});
+    const user = renderPrompt('mapping-validation-user', {
+        userQueryContext,
+        extractedContext,
+        volumeName,
+        numTitles,
+        trackDurations: JSON.stringify(trackDurations),
+        matchedTitle: matchedTitle || 'Unknown',
+        matchedType: matchedType || 'unknown',
+        seasonNumber: seasonNumber || 'N/A',
+        totalEpisodes: totalEpisodes || 0,
+        mappedEpisodeCount,
+        mappedEpisodeRange,
+        tracksMatched: mappingResults?.summary?.tracksMatched || 0,
+        tracksSkipped: mappingResults?.summary?.tracksSkipped || 0,
+        overallConfidence: Math.round((mappingResults?.overallConfidence || 0) * 100)
+    });
+
+    return { system, user };
+}
+
 module.exports = {
     loadTemplate,
     interpolate,
     renderPrompt,
     clearCache,
     buildTmdbMatchPrompts,
-    buildTrackMappingPrompts
+    buildTrackMappingPrompts,
+    buildMappingValidationPrompts
 };

@@ -78,6 +78,22 @@ const TrackMappingResponseSchema = z.object({
     overallConfidence: z.number().min(0).max(1).describe('Overall confidence in the mapping')
 });
 
+// Schema for individual concerns in mapping validation
+const MappingConcernSchema = z.object({
+    severity: z.enum(['info', 'warning', 'error']).describe('Severity: info (FYI), warning (review recommended), error (likely wrong)'),
+    message: z.string().describe('User-friendly description of the concern'),
+    suggestion: z.string().nullable().describe('What the user could do about it, or null if no action needed')
+});
+
+// Schema for AI validation of mapping results
+const MappingValidationSchema = z.object({
+    isValid: z.boolean().describe('Whether the overall mapping appears correct and expected'),
+    concerns: z.array(MappingConcernSchema).describe('List of concerns (empty if everything looks good)'),
+    summary: z.string().describe('Brief summary of the validation assessment'),
+    expectedOnDisc: z.string().nullable().describe('What episodes/content would be expected on this disc based on context, or null if unsure'),
+    reasoning: z.string().describe('Detailed reasoning for the validation assessment')
+});
+
 module.exports = {
     VALID_EXTRA_TYPES,
     SuggestedSearchSchema,
@@ -86,5 +102,7 @@ module.exports = {
     TrackMappingSchema,
     RuntimeAnalysisSchema,
     MappingSummarySchema,
-    TrackMappingResponseSchema
+    TrackMappingResponseSchema,
+    MappingConcernSchema,
+    MappingValidationSchema
 };
