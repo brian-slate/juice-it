@@ -1,4 +1,4 @@
-.PHONY: help test test-core test-prompts test-runtime test-openai demo install use-local use-homebrew release release-minor release-major diagnose
+.PHONY: help test test-core test-prompts test-runtime test-openai test-query demo install use-local use-homebrew release release-minor release-major diagnose
 
 help:
 	@echo "JuiceIt Development Commands"
@@ -14,6 +14,7 @@ help:
 	@echo "  make test-prompts     - Run prompt/schema tests only"
 	@echo "  make test-runtime     - Run runtime analysis tests only"
 	@echo "  make test-openai      - Run OpenAI API integration tests only"
+	@echo "  make test-query QUERY=\"your query\" - Test AI query extraction for TMDB"
 	@echo "  make demo             - Run interactive mapping demo"
 	@echo "  make diagnose         - Run diagnostic mode (analyze disc and mapping)"
 	@echo ""
@@ -49,6 +50,9 @@ test-runtime:
 
 test-openai:
 	npm run test:openai
+
+test-query:
+	@node test/test-query-extraction.js "$(QUERY)"
 
 demo:
 	npm run demo

@@ -5,21 +5,16 @@
  * This script rips all tracks from a DVD using HandBrakeCLI.
  *
  * Usage:
+ *   juice-it                              Guided selection (scan disc, pick from results)
+ *   juice-it "title or show info"         Search with your description
  *   juice-it [options]
  *
- * Options:
- *   --help      Show this help message
- *   --output    Specify the output directory
- *   --dvdSource Specify the DVD source (e.g., /dev/disk5)
- *   --title     Specify the movie/show title for TMDB lookup
- *   --quality   Set the encoding quality (e.g., 20)
- *   --no-deinterlace  Disable deinterlacing
- *   --subtitles  Specify the subtitle track number (default: 1)
- *   --sub-lang   Specify the subtitle language code (default: eng)
- *   --verbose   Show detailed technical output
- *
- * Example:
- *   juice-it --output /path/to/output --dvdSource /dev/disk5
+ * Examples:
+ *   juice-it                              # Interactive: scan disc, show matches
+ *   juice-it "Ed, Edd n Eddy season 2"    # TV show with season
+ *   juice-it "Avatar 2009"                # Movie with year
+ *   juice-it --raw                        # Skip metadata, use disc name
+ *   juice-it -i                           # Full interactive mode
  *
  * Requirements:
  *   - Node.js
@@ -37,7 +32,7 @@ const { zodResponseFormat } = require('openai/helpers/zod');
 
 // Prompt templates and schemas
 const { buildTmdbMatchPrompts, buildTrackMappingPrompts } = require('./prompts/loader');
-const { TmdbMatchSchema, TrackMappingResponseSchema } = require('./prompts/schemas');
+const { QueryExtractionSchema, TmdbMatchSchema, TrackMappingResponseSchema } = require('./prompts/schemas');
 
 // AI configuration
 const aiConfig = require('./config/ai-config');
@@ -46,7 +41,7 @@ const aiConfig = require('./config/ai-config');
 const { getLogger } = require('./lib/logger');
 
 // Plex-compatible naming utilities
-const { sanitizeForPlex, calculateProposedName } = require('./lib/naming');
+const { sanitizeForPlex, calculateProposedName, buildExtrasFileName, buildPlexFolderPath } = require('./lib/naming');
 
 // ==================== LOGGING ====================
 
@@ -115,16 +110,29 @@ function saveConfig(config) {
 const config = loadConfig();
 const TMDB_API_KEY = config.tmdbApiKey || 'REMOVED_API_KEY'; // Demo key fallback
 
-async function searchTMDB(query, isTV = false) {
+async function searchTMDB(query, isTV = false, year = null) {
     try {
         const endpoint = isTV ? 'search/tv' : 'search/movie';
-        const response = await axios.get(`https://api.themoviedb.org/3/${endpoint}`, {
-            params: {
-                api_key: TMDB_API_KEY,
-                query: query,
-                language: 'en-US'
+        const params = {
+            api_key: TMDB_API_KEY,
+            query: query,
+            language: 'en-US'
+        };
+
+        // Add year filter if provided (helps disambiguate titles like "Avatar")
+        // Movies use "year", TV shows use "first_air_date_year"
+        if (year) {
+            if (isTV) {
+                params.first_air_date_year = year;
+            } else {
+                params.year = year;
             }
-        });
+            logger.debug(`TMDB search: "${query}" (${isTV ? 'TV' : 'movie'}, year: ${year})`);
+        } else {
+            logger.debug(`TMDB search: "${query}" (${isTV ? 'TV' : 'movie'})`);
+        }
+
+        const response = await axios.get(`https://api.themoviedb.org/3/${endpoint}`, { params });
         return response.data.results || [];
     } catch (error) {
         logger.debug(`Error searching TMDB: ${error.message}`);
@@ -298,18 +306,83 @@ async function callOpenAI(systemMessage, userMessage, opts = {}) {
     }
 }
 
+// AI-powered query extraction (clean user input for TMDB search)
+async function aiExtractSearchQuery(userQuery) {
+    try {
+        logger.debug(`[AI] Extracting search query from: "${userQuery}"`);
+
+        const systemPrompt = `You extract movie/TV show information from user queries to optimize TMDB API searches.
+
+## TMDB Search API Behavior
+TMDB's /search/movie and /search/tv endpoints work as follows:
+- The "query" parameter is a TEXT SEARCH that matches against original titles, translated titles, and alternative names
+- TMDB does fuzzy matching but works BEST with just the title/name - no extra words
+- Extra words like "complete series", "box set", "disc 1" will HURT search results
+- The API has separate "year" (movies) and "first_air_date_year" (TV) parameters to filter by year
+
+## Your Task
+Given a user's input (which may include extra words), extract:
+1. searchQuery: JUST the title/name - remove ALL extra words (disc, season, complete series, box set, collection, etc.)
+2. season: Season number if mentioned (null if not)
+3. disc: Disc number if mentioned (null if not)
+4. year: Year if mentioned - IMPORTANT for disambiguation (null if not)
+5. isTV: Whether this appears to be a TV show (has seasons/episodes) vs a movie
+
+## Critical Rules
+- searchQuery should be CLEAN - only the actual title that TMDB would recognize
+- Keep regional identifiers that are part of the title (e.g., "The Office US" vs "The Office UK")
+- Preserve special characters in titles (e.g., "Ed, Edd n Eddy" keeps the commas)
+- If user mentions a year (e.g., "Avatar 2009"), extract it separately - don't include in searchQuery
+- "s01", "s1", "season 1" all mean season: 1
+- "d1", "disc 1", "disk 1" all mean disc: 1
+
+## Examples
+- "ed, edd n eddy the complete series disc 3" → searchQuery: "Ed, Edd n Eddy", isTV: true, disc: 3
+- "Avatar 2009" → searchQuery: "Avatar", year: 2009, isTV: false
+- "avatar the last airbender" → searchQuery: "Avatar: The Last Airbender", isTV: true
+- "The Office US season 3 disc 2" → searchQuery: "The Office US", isTV: true, season: 3, disc: 2
+- "breaking bad s04" → searchQuery: "Breaking Bad", isTV: true, season: 4
+- "lord of the rings extended edition" → searchQuery: "The Lord of the Rings", isTV: false
+- "friends complete box set" → searchQuery: "Friends", isTV: true
+- "game of thrones GOT s8" → searchQuery: "Game of Thrones", isTV: true, season: 8`;
+
+        const userPrompt = `Extract the TMDB search information from this user query: "${userQuery}"`;
+
+        const result = await callOpenAI(systemPrompt, userPrompt, {
+            schema: QueryExtractionSchema,
+            schemaName: 'query_extraction'
+        });
+
+        if (result) {
+            logger.debug(`[AI] Extracted: "${result.searchQuery}" (season: ${result.season}, disc: ${result.disc}, year: ${result.year})`);
+            log(`AI query extraction: ${JSON.stringify(result)}`);
+        }
+
+        return result;
+    } catch (error) {
+        logger.debug(`[AI] Query extraction error: ${error.message}`);
+        return null;
+    }
+}
+
 // AI-powered TMDB match selection
-async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults) {
+async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, userQuery = null) {
     try {
         if (!options.diagnose) {
             console.log('\n🤖 Using AI to analyze disc and select best match...');
         }
         logger.debug('[AI] Starting TMDB match selection');
         logger.debug(`[AI] Analyzing: ${volumeName} with ${numTitles} tracks`);
+        if (userQuery) {
+            logger.debug(`[AI] User query: "${userQuery}"`);
+        }
         logger.debug(`[AI] Track durations: ${JSON.stringify(trackDurations)}`);
         logger.debug(`[AI] TMDB results: ${movieResults.length} movies, ${tvResults.length} TV shows`);
         log('AI: Starting TMDB match selection');
         log(`AI: Disc - ${volumeName} with ${numTitles} tracks`);
+        if (userQuery) {
+            log(`AI: User query - "${userQuery}"`);
+        }
         log(`AI: Track durations - ${JSON.stringify(trackDurations)}`);
         log(`AI: TMDB results - ${movieResults.length} movies, ${tvResults.length} TV shows`);
 
@@ -319,7 +392,8 @@ async function aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieRes
             numTitles,
             trackDurations,
             movieResults,
-            tvResults
+            tvResults,
+            userQuery
         });
 
         // Call OpenAI with structured output validation
@@ -402,7 +476,7 @@ function analyzeEpisodeRuntimes(episodes) {
 }
 
 // AI-powered track mapping (Option C: Raw data + soft guidance)
-async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
+async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null, unrippableTracks = []) {
     try {
         console.log('\n🤖 Using AI to map tracks to episodes...');
         logger.debug('[AI] Starting track mapping (Option C: raw data + soft guidance)');
@@ -410,8 +484,10 @@ async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
         logger.debug(`[AI] Content type: ${metadata.type}`);
         logger.debug(`[AI] Episodes available: ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
         logger.debug(`[AI] lsdvd metadata: ${lsdvdMetadata ? 'available' : 'not available'}`);
+        logger.debug(`[AI] Unrippable tracks: ${unrippableTracks.length > 0 ? unrippableTracks.join(', ') : 'none'}`);
         log('AI: Starting track mapping (Option C)');
         log(`AI: Track count - ${Object.keys(trackDurations).length}`);
+        log(`AI: Unrippable tracks - ${unrippableTracks.length > 0 ? unrippableTracks.join(', ') : 'none'}`);
         log(`AI: Content type - ${metadata.type}`);
         log(`AI: Episodes - ${metadata.episodes ? metadata.episodes.length : 'N/A'}`);
         log(`AI: lsdvd metadata - ${lsdvdMetadata ? 'available' : 'not available'}`);
@@ -426,7 +502,8 @@ async function aiMapTracks(trackDurations, metadata, lsdvdMetadata = null) {
             metadata,
             trackDurations,
             runtimeAnalysis,
-            lsdvdMetadata
+            lsdvdMetadata,
+            unrippableTracks
         });
 
         // Call OpenAI with structured output validation
@@ -612,24 +689,63 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
 
     // Use provided search title or clean up the volume name for searching
     let cleanName;
-    if (searchOptions.searchTitle) {
-        cleanName = searchOptions.searchTitle.trim();
-        console.log(`   Using provided title: "${cleanName}"`);
+    let extractedInfo = null; // AI-extracted season/disc/year info
+    const config = loadConfig();
+
+    if (searchOptions.searchQuery) {
+        // Try AI-powered query extraction if OpenAI is configured
+        if (config.openaiApiKey) {
+            console.log('   Analyzing your query...');
+            extractedInfo = await aiExtractSearchQuery(searchOptions.searchQuery);
+        }
+
+        if (extractedInfo && extractedInfo.searchQuery) {
+            cleanName = extractedInfo.searchQuery;
+            console.log(`   Using provided title: "${cleanName}"`);
+            if (extractedInfo.season) {
+                console.log(`   Detected season: ${extractedInfo.season}`);
+            }
+            if (extractedInfo.year) {
+                console.log(`   Detected year: ${extractedInfo.year}`);
+            }
+        } else {
+            // Fallback to regex-based cleanup if AI fails or not available
+            cleanName = searchOptions.searchQuery.trim()
+                .replace(/\s+D\d+$/i, '')                    // Remove "D1", "D2" at end
+                .replace(/\s+disc\s*\d*$/i, '')              // Remove "disc 1", "disc" at end
+                .replace(/\s+season\s*\d*$/i, '')            // Remove "season 1", "season" at end
+                .replace(/\s+s\d+$/i, '')                    // Remove "s01", "s1" at end
+                .replace(/\s+the\s+complete\s+series$/i, '') // Remove "the complete series"
+                .replace(/\s+complete\s+series$/i, '')       // Remove "complete series"
+                .replace(/\s+box\s*set$/i, '')               // Remove "box set", "boxset"
+                .replace(/\s+collection$/i, '')              // Remove "collection"
+                .replace(/\s{2,}/g, ' ')                     // Normalize multiple spaces
+                .trim();
+            console.log(`   Using provided title: "${cleanName}"`);
+            if (cleanName !== searchOptions.searchQuery.trim()) {
+                logger.debug(`Cleaned search query: "${searchOptions.searchQuery}" → "${cleanName}"`);
+            }
+        }
     } else {
-        cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').trim();
+        // Clean up volume name: remove underscores, disc indicators (D1, DISC 1, etc.)
+        cleanName = volumeName
+            .replace(/_/g, ' ')
+            .replace(/\s+D\d+$/i, '')      // Remove "D1", "D2" at end
+            .replace(/DISC\s*\d+$/i, '')   // Remove "DISC 1", "DISC1" at end
+            .trim();
     }
-    const mediaType = guessMediaType(numTitles);
-    
-    log(`Searching for: "${cleanName}" (guessing type: ${mediaType})`);
-    
-    // Search both movie and TV
-    const movieResults = await searchTMDB(cleanName, false);
-    const tvResults = await searchTMDB(cleanName, true);
+    const mediaType = extractedInfo?.isTV ? 'tv' : guessMediaType(numTitles);
+    const searchYear = extractedInfo?.year || null;
+
+    log(`Searching for: "${cleanName}" (guessing type: ${mediaType}${searchYear ? `, year: ${searchYear}` : ''})`);
+
+    // Search both movie and TV (pass year if we have it for better disambiguation)
+    const movieResults = await searchTMDB(cleanName, false, searchYear);
+    const tvResults = await searchTMDB(cleanName, true, searchYear);
     
     // Try AI-powered selection if available and we have track durations
-    const config = loadConfig();
     if (config.openaiApiKey && trackDurations) {
-        const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults);
+        const aiSelection = await aiSelectTmdbMatch(volumeName, numTitles, trackDurations, movieResults, tvResults, searchOptions.searchQuery);
 
         if (aiSelection && aiSelection.selectedId) {
             const selectedResult = aiSelection.selectedType === 'tv'
@@ -643,12 +759,14 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             if (selectedResult && shouldAutoSelect) {
                 const confidenceStr = aiSelection.confidence >= 0.8 ? '' : ` (${(aiSelection.confidence * 100).toFixed(0)}% confidence)`;
                 if (aiSelection.selectedType === 'tv') {
-                    const season = aiSelection.season || 1;
+                    // Use season from: AI extraction season > AI extraction disc (for box sets) > AI selection > default 1
+                    const season = extractedInfo?.season || extractedInfo?.disc || aiSelection.season || 1;
                     const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
                     const showYear = selectedResult.first_air_date ? selectedResult.first_air_date.split('-')[0] : null;
                     console.log(`\n   ✨ AI auto-selected: ${selectedResult.name} - Season ${season}${confidenceStr}`);
                     return {
                         type: 'tv',
+                        tmdbId: selectedResult.id,
                         name: selectedResult.name,
                         year: showYear,
                         season: season,
@@ -659,13 +777,14 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                     console.log(`\n   ✨ AI auto-selected: ${selectedResult.title}${confidenceStr}`);
                     return {
                         type: 'movie',
+                        tmdbId: selectedResult.id,
                         name: selectedResult.title,
                         year: selectedResult.release_date ? selectedResult.release_date.split('-')[0] : null,
                         aiSelected: true
                     };
                 }
             } else if (aiSelection.confidence < 0.6) {
-                // Low confidence - exit with helpful instructions
+                // Low confidence - show interactive confirmation instead of exiting
                 const suggestion = selectedResult
                     ? (aiSelection.selectedType === 'tv' ? selectedResult.name : selectedResult.title)
                     : null;
@@ -673,21 +792,95 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                 console.log(`\n   ⚠️  AI confidence too low (${(aiSelection.confidence * 100).toFixed(0)}%)`);
                 console.log(`   The disc name "${cleanName}" doesn't clearly match any known title.`);
                 if (suggestion) {
-                    console.log(`   Best guess: "${suggestion}" (but not confident enough to auto-select)\n`);
+                    console.log(`   Best guess: "${suggestion}"\n`);
                 } else {
                     console.log('');
                 }
-                console.log('━'.repeat(60));
-                console.log('  To rip this disc, use one of these options:\n');
-                console.log('  1. Specify the title:');
-                console.log('     juice-it --title "Movie Name"');
-                console.log('     juice-it --title "TV Show Name"\n');
-                console.log('  2. Use interactive mode to search and select:');
-                console.log('     juice-it --interactive\n');
-                console.log('  3. Skip metadata lookup entirely (raw rip):');
-                console.log('     juice-it --raw');
-                console.log('━'.repeat(60) + '\n');
-                process.exit(1);
+
+                // Build choices for low-confidence confirmation
+                const lowConfChoices = [];
+                if (selectedResult) {
+                    const suggestionLabel = aiSelection.selectedType === 'tv'
+                        ? `📺 Accept: ${selectedResult.name}`
+                        : `🎬 Accept: ${selectedResult.title}`;
+                    lowConfChoices.push({ name: suggestionLabel, value: 'accept' });
+                }
+                lowConfChoices.push({ name: '🔍 Search for a different title...', value: 'search' });
+                lowConfChoices.push({ name: '✏️  Enter custom title manually...', value: 'custom' });
+                lowConfChoices.push({ name: '📀 Skip metadata (raw rip)', value: 'raw' });
+                lowConfChoices.push({ name: '❌ Cancel', value: 'cancel' });
+
+                try {
+                    const confirmPrompt = new Select({
+                        message: 'What would you like to do?',
+                        choices: lowConfChoices
+                    });
+                    const choice = await confirmPrompt.run();
+
+                    if (choice === 'accept' && selectedResult) {
+                        if (aiSelection.selectedType === 'tv') {
+                            const season = extractedInfo?.season || extractedInfo?.disc || aiSelection.season || 1;
+                            const seasonDetails = await getTVSeasonDetails(selectedResult.id, season);
+                            const showYear = selectedResult.first_air_date ? selectedResult.first_air_date.split('-')[0] : null;
+                            console.log(`\n   ✓ Accepted: ${selectedResult.name} - Season ${season}\n`);
+                            return {
+                                type: 'tv',
+                                tmdbId: selectedResult.id,
+                                name: selectedResult.name,
+                                year: showYear,
+                                season: season,
+                                episodes: seasonDetails ? seasonDetails.episodes : null
+                            };
+                        } else {
+                            console.log(`\n   ✓ Accepted: ${selectedResult.title}\n`);
+                            return {
+                                type: 'movie',
+                                tmdbId: selectedResult.id,
+                                name: selectedResult.title,
+                                year: selectedResult.release_date ? selectedResult.release_date.split('-')[0] : null
+                            };
+                        }
+                    } else if (choice === 'search') {
+                        // Prompt for a new search query
+                        const searchPrompt = new Input({
+                            message: 'Enter search query:',
+                            initial: cleanName
+                        });
+                        const newQuery = await searchPrompt.run();
+                        if (newQuery && newQuery.trim()) {
+                            // Recursively call lookupMetadata with the new query
+                            return lookupMetadata(volumeName, numTitles, trackDurations, {
+                                ...searchOptions,
+                                searchQuery: newQuery.trim()
+                            });
+                        }
+                        // If empty, fall through to interactive
+                        options.interactive = true;
+                    } else if (choice === 'custom') {
+                        const customPrompt = new Input({
+                            message: 'Enter custom title:',
+                            initial: volumeName
+                        });
+                        const customName = await customPrompt.run();
+                        if (customName && customName.trim()) {
+                            console.log(`\n   ✓ Using custom title: "${customName.trim()}"\n`);
+                            return { type: 'custom', name: customName.trim() };
+                        }
+                        // Fall through to interactive if empty
+                        options.interactive = true;
+                    } else if (choice === 'raw') {
+                        console.log('\n  📀 Raw Rip Mode\n');
+                        console.log('  Skipping metadata lookup and AI mapping.');
+                        console.log('  Tracks will be named: ' + volumeName + '_1.mp4, ' + volumeName + '_2.mp4, etc.\n');
+                        return { type: 'raw', volumeName };
+                    } else {
+                        // cancel
+                        return null;
+                    }
+                } catch (error) {
+                    // User cancelled with Ctrl+C
+                    return null;
+                }
             }
         }
     }
@@ -701,6 +894,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             console.log(`\n   📺 Auto-selected: ${show.name} - Season 1`);
             return {
                 type: 'tv',
+                tmdbId: show.id,
                 name: show.name,
                 year: showYear,
                 season: 1,
@@ -711,24 +905,70 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             console.log(`\n   🎬 Auto-selected: ${movie.title}`);
             return {
                 type: 'movie',
+                tmdbId: movie.id,
                 name: movie.title,
                 year: movie.release_date ? movie.release_date.split('-')[0] : null
             };
         } else {
-            // No TMDB results found - exit with helpful instructions
-            console.log(`\n   ❌ Couldn't identify disc automatically`);
-            console.log(`   The disc name "${cleanName}" doesn't match any known titles.\n`);
-            console.log('━'.repeat(60));
-            console.log('  To rip this disc, use one of these options:\n');
-            console.log('  1. Specify the title:');
-            console.log('     juice-it --title "Movie Name"');
-            console.log('     juice-it --title "TV Show Name"\n');
-            console.log('  2. Use interactive mode to search and select:');
-            console.log('     juice-it --interactive\n');
-            console.log('  3. Skip metadata lookup entirely (raw rip):');
-            console.log('     juice-it --raw');
-            console.log('━'.repeat(60) + '\n');
-            process.exit(1);
+            // No TMDB results found - show interactive options instead of exiting
+            console.log(`\n   ⚠️  No TMDB results found for "${cleanName}"`);
+            console.log('   The disc name may not match the actual title.\n');
+
+            const noResultsChoices = [
+                { name: '🔍 Search for a different title...', value: 'search' },
+                { name: '✏️  Enter custom title manually...', value: 'custom' },
+                { name: '📀 Skip metadata (raw rip)', value: 'raw' },
+                { name: '❌ Cancel', value: 'cancel' }
+            ];
+
+            try {
+                const noResultsPrompt = new Select({
+                    message: 'What would you like to do?',
+                    choices: noResultsChoices
+                });
+                const choice = await noResultsPrompt.run();
+
+                if (choice === 'search') {
+                    // Prompt for a new search query
+                    const searchPrompt = new Input({
+                        message: 'Enter search query:',
+                        initial: cleanName
+                    });
+                    const newQuery = await searchPrompt.run();
+                    if (newQuery && newQuery.trim()) {
+                        // Recursively call lookupMetadata with the new query
+                        return lookupMetadata(volumeName, numTitles, trackDurations, {
+                            ...searchOptions,
+                            searchQuery: newQuery.trim()
+                        });
+                    }
+                    // If empty, fall through to interactive
+                    options.interactive = true;
+                } else if (choice === 'custom') {
+                    const customPrompt = new Input({
+                        message: 'Enter custom title:',
+                        initial: volumeName
+                    });
+                    const customName = await customPrompt.run();
+                    if (customName && customName.trim()) {
+                        console.log(`\n   ✓ Using custom title: "${customName.trim()}"\n`);
+                        return { type: 'custom', name: customName.trim() };
+                    }
+                    // Fall through to interactive if empty
+                    options.interactive = true;
+                } else if (choice === 'raw') {
+                    console.log('\n  📀 Raw Rip Mode\n');
+                    console.log('  Skipping metadata lookup and AI mapping.');
+                    console.log('  Tracks will be named: ' + volumeName + '_1.mp4, ' + volumeName + '_2.mp4, etc.\n');
+                    return { type: 'raw', volumeName };
+                } else {
+                    // cancel
+                    return null;
+                }
+            } catch (error) {
+                // User cancelled with Ctrl+C
+                return null;
+            }
         }
     }
     
@@ -894,6 +1134,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
                 const showYear = newSelected.data.first_air_date ? newSelected.data.first_air_date.split('-')[0] : null;
                 return {
                     type: 'tv',
+                    tmdbId: newSelected.data.id,
                     name: newSelected.data.name,
                     year: showYear,
                     season: season,
@@ -902,6 +1143,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
             } else {
                 return {
                     type: 'movie',
+                    tmdbId: newSelected.data.id,
                     name: newSelected.data.title,
                     year: newSelected.data.release_date ? newSelected.data.release_date.split('-')[0] : null
                 };
@@ -934,6 +1176,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
 
             return {
                 type: 'tv',
+                tmdbId: selected.data.id,
                 name: selected.data.name,
                 year: showYear,
                 season: season,
@@ -942,6 +1185,7 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
         } else {
             return {
                 type: 'movie',
+                tmdbId: selected.data.id,
                 name: selected.data.title,
                 year: selected.data.release_date ? selected.data.release_date.split('-')[0] : null
             };
@@ -951,6 +1195,179 @@ async function lookupMetadata(volumeName, numTitles, trackDurations = null, sear
         console.log('\nUsing disc name as fallback\n');
         log('User cancelled selection or error occurred');
         return { type: 'disc', volumeName };
+    }
+}
+
+/**
+ * Guided metadata selection for naked invocations (juice-it with no arguments)
+ * Shows disc info, searches TMDB, and presents an interactive menu
+ */
+async function guidedMetadataSelection(volumeName, numTitles, _trackDurations) {
+    // Clean up volume name for initial search
+    const cleanName = volumeName
+        .replace(/_/g, ' ')
+        .replace(/\s+D\d+$/i, '')
+        .replace(/DISC\s*\d+$/i, '')
+        .trim();
+
+    const mediaType = guessMediaType(numTitles);
+
+    console.log('\n🔍 Searching TMDB...');
+    log(`Guided selection: searching for "${cleanName}" (guessing type: ${mediaType})`);
+
+    // Search both movie and TV
+    let movieResults = await searchTMDB(cleanName, false);
+    let tvResults = await searchTMDB(cleanName, true);
+
+    // Loop to allow re-searching
+    while (true) {
+        const choices = [];
+
+        // Add TV results first if we think it's a TV show
+        if (mediaType === 'tv') {
+            tvResults.slice(0, 5).forEach(show => {
+                const year = show.first_air_date ? `(${show.first_air_date.split('-')[0]})` : '';
+                choices.push({
+                    name: `📺 ${show.name} ${year}`,
+                    value: { type: 'tv', data: show },
+                    hint: show.overview ? show.overview.substring(0, 60) + '...' : ''
+                });
+            });
+            movieResults.slice(0, 5).forEach(movie => {
+                const year = movie.release_date ? `(${movie.release_date.split('-')[0]})` : '';
+                choices.push({
+                    name: `🎬 ${movie.title} ${year}`,
+                    value: { type: 'movie', data: movie },
+                    hint: movie.overview ? movie.overview.substring(0, 60) + '...' : ''
+                });
+            });
+        } else {
+            movieResults.slice(0, 5).forEach(movie => {
+                const year = movie.release_date ? `(${movie.release_date.split('-')[0]})` : '';
+                choices.push({
+                    name: `🎬 ${movie.title} ${year}`,
+                    value: { type: 'movie', data: movie },
+                    hint: movie.overview ? movie.overview.substring(0, 60) + '...' : ''
+                });
+            });
+            tvResults.slice(0, 5).forEach(show => {
+                const year = show.first_air_date ? `(${show.first_air_date.split('-')[0]})` : '';
+                choices.push({
+                    name: `📺 ${show.name} ${year}`,
+                    value: { type: 'tv', data: show },
+                    hint: show.overview ? show.overview.substring(0, 60) + '...' : ''
+                });
+            });
+        }
+
+        // Add utility options
+        choices.push({ name: '🔍 Search with different query...', value: { type: 'search' } });
+        choices.push({ name: '✏️  Enter custom title manually...', value: { type: 'custom' } });
+        choices.push({ name: '📀 Skip metadata (raw rip)', value: { type: 'raw' } });
+        choices.push({ name: '❌ Cancel', value: { type: 'cancel' } });
+
+        // Show message if no TMDB results
+        if (movieResults.length === 0 && tvResults.length === 0) {
+            console.log(`\n   ⚠️  No TMDB results found for "${cleanName}"`);
+            console.log('   You can search for a different title or enter one manually.\n');
+        }
+
+        try {
+            const selectPrompt = new Select({
+                message: 'Select a title or action:',
+                choices: choices
+            });
+
+            const selected = await selectPrompt.run();
+
+            if (selected.type === 'cancel') {
+                return null;
+            }
+
+            if (selected.type === 'raw') {
+                console.log('\n  📀 Raw Rip Mode\n');
+                console.log('  Skipping metadata lookup and AI mapping.');
+                console.log('  Tracks will be named: ' + volumeName + '_1.mp4, ' + volumeName + '_2.mp4, etc.\n');
+                return { type: 'raw', volumeName };
+            }
+
+            if (selected.type === 'search') {
+                const searchPrompt = new Input({
+                    message: 'Enter search query:',
+                    initial: cleanName
+                });
+                const newQuery = await searchPrompt.run();
+                if (newQuery && newQuery.trim()) {
+                    console.log(`\n🔍 Searching for "${newQuery}"...\n`);
+                    movieResults = await searchTMDB(newQuery, false);
+                    tvResults = await searchTMDB(newQuery, true);
+                }
+                continue; // Loop back to show results
+            }
+
+            if (selected.type === 'custom') {
+                const customPrompt = new Input({
+                    message: 'Enter custom title:',
+                    initial: volumeName
+                });
+                const customName = await customPrompt.run();
+                if (customName && customName.trim()) {
+                    console.log(`\n   ✓ Using custom title: "${customName.trim()}"\n`);
+                    return { type: 'custom', name: customName.trim() };
+                }
+                continue; // Loop back if empty
+            }
+
+            // Handle TV show selection - prompt for season
+            if (selected.type === 'tv') {
+                const show = selected.data;
+                const showYear = show.first_air_date ? show.first_air_date.split('-')[0] : null;
+
+                const seasonPrompt = new Input({
+                    message: `Which season of "${show.name}"?`,
+                    initial: '1',
+                    validate(value) {
+                        const num = parseInt(value, 10);
+                        if (isNaN(num) || num < 1) {
+                            return 'Please enter a valid season number';
+                        }
+                        return true;
+                    }
+                });
+
+                const seasonInput = await seasonPrompt.run();
+                const season = parseInt(seasonInput, 10);
+
+                console.log(`\n   ✓ Selected: ${show.name} - Season ${season}\n`);
+
+                const seasonDetails = await getTVSeasonDetails(show.id, season);
+
+                return {
+                    type: 'tv',
+                    tmdbId: show.id,
+                    name: show.name,
+                    year: showYear,
+                    season: season,
+                    episodes: seasonDetails ? seasonDetails.episodes : null
+                };
+            }
+
+            // Handle movie selection
+            if (selected.type === 'movie') {
+                const movie = selected.data;
+                console.log(`\n   ✓ Selected: ${movie.title}\n`);
+                return {
+                    type: 'movie',
+                    tmdbId: movie.id,
+                    name: movie.title,
+                    year: movie.release_date ? movie.release_date.split('-')[0] : null
+                };
+            }
+
+        } catch (error) {
+            // User cancelled with Ctrl+C
+            return null;
+        }
     }
 }
 
@@ -1032,9 +1449,6 @@ args.forEach((arg, index) => {
     } else if (arg === '--dvdSource' && args[index + 1]) {
         options.dvdSource = args[index + 1];
         consumedIndices.add(index + 1);
-    } else if (arg === '--title' && args[index + 1]) {
-        options.searchTitle = args[index + 1];
-        consumedIndices.add(index + 1);
     } else if (arg === '--quality' && args[index + 1]) {
         options.encoding.quality = args[index + 1];
         consumedIndices.add(index + 1);
@@ -1065,8 +1479,8 @@ args.forEach((arg, index) => {
     } else if (arg === '--raw') {
         options.rawMode = true;
         options.noLookup = true;
-    } else if (arg === '--include-extras') {
-        options.includeExtras = true;
+    } else if (arg === '--main-only') {
+        options.mainOnly = true;
     } else if (arg === '--dry-run') {
         options.dryRun = true;
     } else if (arg.startsWith('-')) {
@@ -1076,6 +1490,19 @@ args.forEach((arg, index) => {
         process.exit(1);
     }
 });
+
+// Collect positional arguments (non-flag, non-consumed args)
+const positionalArgs = [];
+args.forEach((arg, index) => {
+    if (consumedIndices.has(index)) return;
+    if (arg.startsWith('-')) return;
+    positionalArgs.push(arg);
+});
+
+// First positional arg(s) become the search query
+if (positionalArgs.length > 0) {
+    options.searchQuery = positionalArgs.join(' ');
+}
 
 // Initialize the logger with verbosity setting
 logger = getLogger({ verbose: options.verbose });
@@ -1802,6 +2229,12 @@ async function getNumberOfTitles() {
             if (cacheData.titleDurations) {
                 global.dvdTitleDurations = cacheData.titleDurations;
             }
+            // Store unrippable tracks globally if available
+            if (cacheData.unrippableTracks) {
+                global.unrippableTracks = cacheData.unrippableTracks;
+            } else {
+                global.unrippableTracks = [];
+            }
             return cacheData.numTitles;
         } else {
             logger.debug("Volume names do not match. Cache will be ignored.");
@@ -1834,6 +2267,7 @@ async function getNumberOfTitles() {
         let lastProgressTime = Date.now();
         let lastScanPercentage = null;
         let stuckTitle = null;
+        const unrippableTracks = []; // Track 0-duration and stuck tracks
         const STUCK_TIMEOUT_MS = 30000; // 30 seconds without ANY progress = stuck
 
         // Stuck detection timer - check every 5 seconds
@@ -1854,13 +2288,20 @@ async function getNumberOfTitles() {
                 logger.debug(`Durations collected: ${JSON.stringify(titleDurations)}`);
                 // Use SIGKILL for immediate termination (SIGTERM can leave zombies on stuck I/O)
                 handbrakeProcess.kill('SIGKILL');
+                // Mark stuck track and all subsequent tracks as unrippable
+                const stuckTrack = stuckTitle || lastReportedTitle;
+                for (let t = stuckTrack; t <= totalTitles; t++) {
+                    if (!unrippableTracks.includes(t)) {
+                        unrippableTracks.push(t);
+                    }
+                }
                 // Reset the DVD drive to clear kernel I/O stuck state, then resolve
                 setTimeout(async () => {
                     if (!resolved) {
                         resolved = true;
                         // Reset the drive to stop kernel read-retry loop
                         await resetDvdDrive(options.dvdSource);
-                        resolve({ code: 0, output, titleDurations, totalTitles, stuckAtTitle: stuckTitle || lastReportedTitle });
+                        resolve({ code: 0, output, titleDurations, totalTitles, stuckAtTitle: stuckTrack, unrippableTracks });
                     }
                 }, 500);
             }
@@ -1919,13 +2360,19 @@ async function getNumberOfTitles() {
                 lastProgressTime = Date.now(); // Reset stuck timer on progress
                 stuckTitle = null; // Clear stuck title since this one completed
 
+                // Mark 0-duration tracks as unrippable (copy-protected or invalid)
+                if (totalMinutes === 0 && !unrippableTracks.includes(lastReportedTitle)) {
+                    unrippableTracks.push(lastReportedTitle);
+                    logger.debug(`Track ${lastReportedTitle}: 0 duration - marking as unrippable`);
+                }
+
                 // Kill process once we have all title durations - HandBrakeCLI hangs on post-processing
                 if (totalTitles > 0 && scannedTitlesCount >= totalTitles) {
                     resolved = true;
                     clearInterval(stuckCheckInterval);
                     process.stdout.write('\r' + ' '.repeat(50) + '\r');
                     handbrakeProcess.kill('SIGKILL');
-                    setTimeout(() => resolve({ code: 0, output, titleDurations, totalTitles }), 500);
+                    setTimeout(() => resolve({ code: 0, output, titleDurations, totalTitles, unrippableTracks }), 500);
                 }
             }
         };
@@ -1945,12 +2392,12 @@ async function getNumberOfTitles() {
                 clearInterval(stuckCheckInterval);
                 // Clear the scanning line
                 process.stdout.write('\r' + ' '.repeat(50) + '\r');
-                resolve({ code, output, titleDurations, totalTitles });
+                resolve({ code, output, titleDurations, totalTitles, unrippableTracks });
             }
         });
     });
 
-    const { code, output, titleDurations, totalTitles: _totalTitles, stuckAtTitle } = scanResult;
+    const { code, output, titleDurations, totalTitles: _totalTitles, stuckAtTitle, unrippableTracks: scannedUnrippable = [] } = scanResult;
 
     if (code === 0 || output.includes('scan: DVD has')) {
         const match = output.match(/scan: DVD has (\d+) title/);
@@ -1973,28 +2420,47 @@ async function getNumberOfTitles() {
 
             // Store globally for use during ripping
             global.dvdTitleDurations = finalDurations;
+            global.unrippableTracks = scannedUnrippable;
 
             // Display track duration summary
             console.log('📋 Track Summary:');
             const sortedTracks = Object.entries(finalDurations).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+            const rippableCount = sortedTracks.filter(([track]) => !scannedUnrippable.includes(parseInt(track))).length;
+            const unrippableCount = scannedUnrippable.length;
+
+            console.log(`   ${rippableCount} rippable track${rippableCount !== 1 ? 's' : ''}`);
+            if (unrippableCount > 0) {
+                console.log(`   ${unrippableCount} unrippable track${unrippableCount !== 1 ? 's' : ''} (copy-protected/invalid)`);
+            }
+            console.log('');
+
             sortedTracks.forEach(([track, duration]) => {
+                const trackNum = parseInt(track);
+                const isUnrippable = scannedUnrippable.includes(trackNum);
+
                 let category = '';
-                if (duration < 5) {
+                let icon = '  ';
+
+                if (isUnrippable) {
+                    category = ' ⊘ unrippable';
+                    icon = '⊘ ';
+                } else if (duration < 5) {
                     category = ' (menu/extra)';
                 } else if (duration > 60) {
-                    category = ' (full disc)';
+                    category = ' (main feature)';
                 } else if (duration >= 20 && duration <= 35) {
                     category = ' (episode)';
                 }
-                console.log(`   Track ${track}: ${duration} min${category}`);
+                console.log(`   ${icon}Track ${track}: ${duration} min${category}`);
             });
             console.log('');
 
-            // Cache the title information with volume name and durations
+            // Cache the title information with volume name, durations, and unrippable tracks
             fs.writeFileSync(cacheFilePath, JSON.stringify({
                 volumeName,
                 numTitles,
                 titleDurations: finalDurations,
+                unrippableTracks: scannedUnrippable,
                 scannedAt: new Date().toISOString()
             }, null, 2));
 
@@ -2641,13 +3107,30 @@ async function ripAllTracks() {
             logger.debug('Raw mode enabled - skipping metadata lookup');
             metadata = { type: 'raw', volumeName };
         } else if (!options.noLookup) {
-            metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations, {
-                searchTitle: options.searchTitle
-            });
+            const hasUserQuery = !!options.searchQuery;
+            const isInteractive = options.interactive;
+
+            if (!hasUserQuery && !isInteractive) {
+                // Naked invocation: show guided selection menu
+                metadata = await guidedMetadataSelection(volumeName, numTitles, global.dvdTitleDurations);
+                if (!metadata) {
+                    console.log('\n  Selection cancelled.\n');
+                    return;
+                }
+            } else {
+                // User provided query or --interactive: existing behavior
+                metadata = await lookupMetadata(volumeName, numTitles, global.dvdTitleDurations, {
+                    searchQuery: options.searchQuery
+                });
+                if (!metadata) {
+                    console.log('\n  Selection cancelled.\n');
+                    return;
+                }
+            }
         } else {
             metadata = { type: 'disc', volumeName };
         }
-        
+
         // If scan-only mode, display metadata and exit
         if (options.scanOnly) {
             console.log('\n' + '━'.repeat(60));
@@ -2802,7 +3285,7 @@ async function ripAllTracks() {
                 const maxAutoRetries = 2; // Auto-retry up to 2 times in automatic mode
 
                 while (!aiMappingResult && !useSequentialMapping) {
-                    aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata);
+                    aiMappingResult = await aiMapTracks(global.dvdTitleDurations, metadata, lsdvdMetadata, global.unrippableTracks || []);
 
                     if (!aiMappingResult) {
                         log('ERROR: AI mapping failed');
@@ -2951,49 +3434,80 @@ async function ripAllTracks() {
             let aiReasoning = null;
             let aiConfidence = null;
 
-            // Skip tracks with 0-duration (copy-protected/invalid tracks)
+            // Mark tracks as unrippable (never attempt to rip)
             if (trackDuration === 0) {
-                status = 'skip';
-                proposedName = '(will skip - 0 duration)';
-                aiReasoning = 'Track has 0 duration (likely copy-protected or invalid)';
+                status = 'unrippable';
+                proposedName = '(unrippable - 0 duration)';
+                aiReasoning = 'Track has 0 duration (copy-protected or invalid)';
                 aiConfidence = null;
-                logger.debug(`Track ${titleNumber}: Skipping (0 duration)`);
+                logger.debug(`Track ${titleNumber}: Unrippable (0 duration)`);
+            }
+            // Check if track is in the unrippable list (stuck during scan, etc.)
+            else if (global.unrippableTracks && global.unrippableTracks.includes(titleNumber)) {
+                status = 'unrippable';
+                proposedName = '(unrippable - stuck during scan)';
+                aiReasoning = 'Track caused scan to hang (likely copy-protected)';
+                aiConfidence = null;
+                logger.debug(`Track ${titleNumber}: Unrippable (stuck during scan)`);
             }
             // Use AI mapping if available
             else if (aiMappingResult && aiMappingResult.mappings) {
                 const aiMapping = aiMappingResult.mappings.find(m => m.trackNum === titleNumber);
                 if (aiMapping) {
                     if (aiMapping.shouldSkip) {
-                        status = 'skip';
-                        proposedName = '(will skip)';
+                        if (options.mainOnly) {
+                            // --main-only mode: skip extras
+                            status = 'skip';
+                            proposedName = '(will skip - extra)';
+                            aiReasoning = aiMapping.reasoning + ' (--main-only mode)';
+                        } else {
+                            // Rip extras with AI-specified type (or default to 'featurette')
+                            const extraType = aiMapping.extraType || 'featurette';
+                            const extraDescription = aiMapping.extraDescription || null;
+                            proposedName = buildExtrasFileName(baseFileName, titleNumber, extraType, extraDescription);
+                            aiReasoning = aiMapping.reasoning + ' (ripping as bonus content)';
+                        }
                     } else if (aiMapping.episodeIndex !== null && metadata.episodes && metadata.episodes[aiMapping.episodeIndex]) {
-                        proposedName = calculateProposedName(aiMapping.episodeIndex, metadata, baseFileName, numTitles);
+                        // Pass episodeEndIndex for multi-episode tracks (e.g., two 11-min episodes in one 22-min track)
+                        const endIndex = aiMapping.episodeEndIndex !== undefined ? aiMapping.episodeEndIndex : null;
+                        proposedName = calculateProposedName(aiMapping.episodeIndex, metadata, baseFileName, numTitles, endIndex);
                     } else {
                         proposedName = calculateProposedName(titleNumber - 1, metadata, baseFileName, numTitles);
                     }
-                    aiReasoning = aiMapping.reasoning;
+                    aiReasoning = aiReasoning || aiMapping.reasoning;
                     aiConfidence = aiMapping.confidence;
                 } else {
-                    // AI didn't provide a mapping for this track - skip it
-                    status = 'skip';
-                    proposedName = '(will skip)';
-                    aiReasoning = 'AI did not analyze this track';
+                    // AI didn't provide a mapping for this track
+                    if (options.mainOnly) {
+                        status = 'skip';
+                        proposedName = '(will skip)';
+                        aiReasoning = 'AI did not analyze this track (--main-only mode)';
+                    } else {
+                        // Default: rip with featurette naming
+                        proposedName = buildExtrasFileName(baseFileName, titleNumber);
+                        aiReasoning = 'AI did not analyze - ripping as bonus content';
+                    }
                     aiConfidence = null;
-                    logger.debug(`[AI] Track ${titleNumber}: Not analyzed by AI, marking as skip`);
+                    logger.debug(`[AI] Track ${titleNumber}: Not analyzed by AI, ${options.mainOnly ? 'skipping' : 'ripping as bonus'}`);
                 }
             } else if (useSequentialMapping) {
-                // Movies: only rip the main feature (longest track), skip everything else as extras
+                // Movies: handle main feature vs extras
                 if (metadata.type === 'movie' && mainFeatureTrack !== null) {
                     if (titleNumber === mainFeatureTrack) {
-                        // Main feature - use clean movie filename without "Part N"
+                        // Main feature - use clean movie filename
                         proposedName = `${baseFileName}.mp4`;
                         aiReasoning = 'Main feature (longest track)';
                         aiConfidence = 1.0;
-                    } else {
-                        // Extras - skip by default (can be ripped with --include-extras)
+                    } else if (options.mainOnly) {
+                        // --main-only mode: skip extras
                         status = 'skip';
                         proposedName = '(will skip - extra)';
-                        aiReasoning = `Extra/bonus content (use --include-extras to rip)`;
+                        aiReasoning = 'Extra/bonus content (--main-only mode)';
+                        aiConfidence = 1.0;
+                    } else {
+                        // Default: rip extras with featurette naming
+                        proposedName = buildExtrasFileName(baseFileName, titleNumber);
+                        aiReasoning = 'Bonus content (featurette)';
                         aiConfidence = 1.0;
                     }
                 } else {
@@ -3025,10 +3539,20 @@ async function ripAllTracks() {
             if (metadata.type === 'tv' && metadata.episodes && aiMappingResult && aiMappingResult.mappings) {
                 const expectedEpisodes = metadata.episodes.length;
                 const mappedEpisodes = aiMappingResult.mappings.filter(m => !m.shouldSkip && m.episodeIndex !== null);
-                const uniqueMappedEpisodes = new Set(mappedEpisodes.map(m => m.episodeIndex)).size;
 
-                if (uniqueMappedEpisodes < expectedEpisodes) {
-                    logger.warn(`Episode mismatch: ${uniqueMappedEpisodes}/${expectedEpisodes} episodes mapped`);
+                // Count total episodes covered, including multi-episode tracks
+                const coveredEpisodes = new Set();
+                for (const m of mappedEpisodes) {
+                    const startIdx = m.episodeIndex;
+                    const endIdx = m.episodeEndIndex !== undefined && m.episodeEndIndex !== null ? m.episodeEndIndex : startIdx;
+                    for (let i = startIdx; i <= endIdx; i++) {
+                        coveredEpisodes.add(i);
+                    }
+                }
+                const totalMappedEpisodes = coveredEpisodes.size;
+
+                if (totalMappedEpisodes < expectedEpisodes) {
+                    logger.warn(`Episode mismatch: ${totalMappedEpisodes}/${expectedEpisodes} episodes mapped`);
 
                     if (!options.interactive) {
                         // Auto mode: warn but continue
@@ -3036,7 +3560,7 @@ async function ripAllTracks() {
                         console.log('  ⚠️  Episode Mapping Mismatch');
                         console.log('');
                         console.log(`  TMDB shows ${expectedEpisodes} episodes for this season,`);
-                        console.log(`  but only ${uniqueMappedEpisodes} episodes were found on the disc.`);
+                        console.log(`  but only ${totalMappedEpisodes} episodes were found on the disc.`);
                         console.log('');
                         console.log('  Possible causes:');
                         console.log('    • This disc may only contain part of the season');
@@ -3046,10 +3570,10 @@ async function ripAllTracks() {
                         console.log('  Continuing with available mappings...');
                         console.log('');
                         global.autoModeWarnings = global.autoModeWarnings || [];
-                        global.autoModeWarnings.push(`Episode mismatch: only ${uniqueMappedEpisodes} of ${expectedEpisodes} episodes found`);
+                        global.autoModeWarnings.push(`Episode mismatch: only ${totalMappedEpisodes} of ${expectedEpisodes} episodes found`);
                     }
-                } else if (uniqueMappedEpisodes > expectedEpisodes) {
-                    logger.warn(`More episodes mapped (${uniqueMappedEpisodes}) than expected (${expectedEpisodes})`);
+                } else if (totalMappedEpisodes > expectedEpisodes) {
+                    logger.warn(`More episodes mapped (${totalMappedEpisodes}) than expected (${expectedEpisodes})`);
                 }
             }
         } // End of "if no plan loaded" block
@@ -3097,18 +3621,21 @@ async function ripAllTracks() {
 
         // Show movie-specific info
         if (metadata.type === 'movie') {
-            const mainTrack = mappingsToRip.find(m => m.status !== 'skip' && m.aiReasoning === 'Main feature (longest track)');
-            const extrasCount = mappingsToRip.filter(m => m.status === 'skip' && m.aiReasoning && m.aiReasoning.includes('Extra')).length;
-            const zeroCount = mappingsToRip.filter(m => m.status === 'skip' && m.aiReasoning && m.aiReasoning.includes('0 duration')).length;
+            const mainTrack = mappingsToRip.find(m => m.status !== 'skip' && m.status !== 'unrippable' && m.aiReasoning === 'Main feature (longest track)');
+            const extrasToRip = mappingsToRip.filter(m => m.status !== 'skip' && m.status !== 'unrippable' && m.aiReasoning && (m.aiReasoning.includes('featurette') || m.aiReasoning.includes('bonus'))).length;
+            const extrasSkipped = mappingsToRip.filter(m => m.status === 'skip').length;
+            const unrippableCount = mappingsToRip.filter(m => m.status === 'unrippable').length;
 
             if (mainTrack) {
                 console.log(`  🎬 Movie: Ripping main feature (Track ${mainTrack.trackNum}, ${mainTrack.duration} min)`);
-                if (extrasCount > 0) {
-                    console.log(`     ${extrasCount} extra track(s) will be skipped`);
-                    console.log(`     Use --include-extras to also rip bonus content`);
+                if (extrasToRip > 0) {
+                    console.log(`     Plus ${extrasToRip} bonus track(s) as featurettes`);
                 }
-                if (zeroCount > 0) {
-                    console.log(`     ${zeroCount} invalid track(s) skipped (0 duration)`);
+                if (extrasSkipped > 0 && options.mainOnly) {
+                    console.log(`     ${extrasSkipped} extra track(s) skipped (--main-only mode)`);
+                }
+                if (unrippableCount > 0) {
+                    console.log(`     ${unrippableCount} track(s) unrippable (copy-protected/invalid)`);
                 }
                 console.log('');
             }
@@ -3117,28 +3644,19 @@ async function ripAllTracks() {
         // Log final mapping table before ripping
         log('=== FINAL TRACK TO FILENAME MAPPINGS ===');
         for (const mapping of mappingsToRip) {
-            const status = mapping.status === 'skip' ? 'SKIP' : mapping.status;
+            let status;
+            if (mapping.status === 'skip') {
+                status = 'SKIP';
+            } else if (mapping.status === 'unrippable') {
+                status = 'UNRIPPABLE';
+            } else {
+                status = mapping.status;
+            }
             log(`Track ${mapping.trackNum} (${mapping.duration} min) → ${status}`);
         }
         log('=== END FINAL MAPPINGS ===');
 
-        // Handle --include-extras: override skip status for extras
-        if (options.includeExtras) {
-            console.log('  ℹ️  --include-extras: Will also rip skipped tracks (menus, extras, etc.)');
-            console.log('');
-            for (const mapping of mappingsToRip) {
-                if (mapping.status === 'skip') {
-                    // Generate an extras filename for this track (Plex-compatible)
-                    // Format: MovieName (Year)-featurette-Bonus N.mp4
-                    const extraName = `${baseFileName}-featurette-Bonus ${mapping.trackNum}.mp4`;
-                    mapping.status = extraName;
-                    mapping.wasSkipped = true; // Track that this was originally skipped
-                    log(`--include-extras: Track ${mapping.trackNum} (was skip) → ${extraName}`);
-                }
-            }
-        }
-
-        // Rip tracks (skip those marked as skip unless --include-extras is used)
+        // Rip tracks (skip those marked as skip or unrippable)
         for (const mapping of mappingsToRip) {
             if (mapping.status === 'skip') {
                 // Track this as a mapping-skipped track
@@ -3147,6 +3665,12 @@ async function ripAllTracks() {
                     duration: mapping.duration,
                     reason: mapping.aiReasoning || 'AI marked as menu/extra'
                 });
+                continue;
+            }
+
+            if (mapping.status === 'unrippable') {
+                // Never attempt unrippable tracks
+                logger.debug(`Track ${mapping.trackNum}: Not attempting (unrippable - ${mapping.aiReasoning})`);
                 continue;
             }
 
@@ -3235,23 +3759,51 @@ async function ripAllTracks() {
             console.log('');
         }
 
+        // Show Plex folder recommendation if we have metadata with TMDB ID
+        const plexPath = buildPlexFolderPath(metadata);
+        if (plexPath && successCount > 0) {
+            console.log('━'.repeat(60));
+            console.log('  📂 Plex Folder Structure');
+            console.log('━'.repeat(60));
+            console.log('');
+            console.log('  For Plex to correctly identify this content, use:');
+            console.log('');
+            if (metadata.type === 'tv') {
+                console.log(`    TV Shows/`);
+                console.log(`      └── ${plexPath.showFolder}/`);
+                console.log(`            └── ${plexPath.seasonFolder}/`);
+                console.log(`                  └── [your ripped files]`);
+            } else {
+                console.log(`    Movies/`);
+                console.log(`      └── ${plexPath.showFolder}/`);
+                console.log(`            └── [your ripped file]`);
+            }
+            console.log('');
+            if (metadata.tmdbId) {
+                console.log(`  The {tmdb-${metadata.tmdbId}} tag ensures exact matching in Plex.`);
+            }
+            console.log('');
+        }
+
         // Show summary of tracks skipped due to mapping (menus, extras, etc.)
         if (mappingSkippedTracks.length > 0 && !options.includeExtras) {
             console.log('━'.repeat(60));
             console.log('  📋 Tracks Not Ripped (Extras/Menus)');
             console.log('━'.repeat(60));
             console.log('');
-            console.log(`  ${mappingSkippedTracks.length} track(s) were skipped based on AI analysis:`);
+            console.log(`  ${mappingSkippedTracks.length} track(s) were skipped:`);
             console.log('');
             mappingSkippedTracks.forEach(({ track, duration, reason }) => {
                 const shortReason = reason && reason.length > 50 ? reason.substring(0, 47) + '...' : reason;
                 console.log(`    • Track ${track} (${duration} min): ${shortReason || 'menu/extra'}`);
             });
             console.log('');
-            console.log('  💡 To also rip these tracks (extras, menus, bonus content):');
-            console.log('');
-            console.log('     juiceit --include-extras');
-            console.log('');
+            if (options.mainOnly) {
+                console.log('  💡 To also rip extras, remove the --main-only flag:');
+                console.log('');
+                console.log('     juiceit');
+                console.log('');
+            }
             console.log('     Or for a raw rip of everything:');
             console.log('     juiceit --raw');
             console.log('');
@@ -3332,9 +3884,16 @@ async function runDiagnosticMode() {
         return;
     }
 
-    // Clean volume name for search
-    const cleanName = volumeName.replace(/_/g, ' ').replace(/D1|D2|DISC|DVD/gi, '').trim();
-    console.log(`  Search Query: "${cleanName}"`);
+    // Use provided search title or clean volume name for search
+    // Use same logic as main flow (lookupMetadata) for consistency
+    let cleanName;
+    if (options.searchQuery) {
+        cleanName = options.searchQuery.trim();
+        console.log(`  Search Query: "${cleanName}" (from command line)`);
+    } else {
+        cleanName = volumeName.replace(/_/g, ' ').replace(/\s+D\d+$/i, '').replace(/DISC\s*\d+$/i, '').trim();
+        console.log(`  Search Query: "${cleanName}" (derived from volume name)`);
+    }
     console.log('');
 
     // Fetch movie and TV results using shared searchTMDB function
@@ -3435,6 +3994,7 @@ async function runDiagnosticMode() {
         const seasonDetails = await getTVSeasonDetails(aiSelection.selectedId, aiSelection.season || 1);
         metadata = {
             type: 'tv',
+            tmdbId: aiSelection.selectedId,
             name: selectedShow?.name || 'Unknown',
             season: aiSelection.season || 1,
             episodes: seasonDetails?.episodes || []
@@ -3443,6 +4003,7 @@ async function runDiagnosticMode() {
         const selectedMovie = movieResults.find(m => m.id === aiSelection.selectedId);
         metadata = {
             type: 'movie',
+            tmdbId: aiSelection.selectedId,
             name: selectedMovie?.title || 'Unknown',
             runtime: selectedMovie?.runtime || null
         };
@@ -3556,7 +4117,7 @@ async function runDiagnosticMode() {
     }
 
     // Use shared aiMapTracks() function with lsdvd metadata
-    const aiMappingResult = await aiMapTracks(trackDurations, metadata, lsdvdMetadata);
+    const aiMappingResult = await aiMapTracks(trackDurations, metadata, lsdvdMetadata, global.unrippableTracks || []);
 
     if (!aiMappingResult) {
         console.log('  ❌ AI mapping failed');
@@ -3741,15 +4302,23 @@ function analyzeMappingIssues(aiMappingResult, metadata) {
 function showHelp() {
     console.log(`
 Usage:
+  juice-it                              Guided selection (scan disc, pick from results)
+  juice-it "title or show info"         Search with your description
   juice-it [options]
+
+Examples:
+  juice-it                              # Interactive: scan disc, show matches
+  juice-it "Ed, Edd n Eddy season 2"    # TV show with season
+  juice-it "Avatar 2009"                # Movie with year
+  juice-it "The Office US s03 disc 2"   # Detailed query for AI
+  juice-it --raw                        # Skip metadata, use disc name
+  juice-it -i                           # Full interactive mode
 
 Options:
   --help            Show this help message
   --setup           Configure TMDB API key for metadata lookup
   --output          Specify the output directory (default: <disc_name>_<date>)
   --dvdSource       Specify the DVD source path (e.g., /dev/disk5)
-  --title           Specify the movie/show title for TMDB lookup
-                    (useful when disc name is cryptic, e.g., "K0_72")
   --quality         Set the encoding quality (e.g., 20)
   --no-deinterlace  Disable deinterlacing
   --no-lookup       Skip online metadata lookup
@@ -3760,26 +4329,16 @@ Options:
   --subtitles       Specify the subtitle track number (default: 1)
   --sub-lang        Specify the subtitle language code (default: eng)
   --verbose         Show detailed technical output
-  --interactive, -i Enable interactive mode for manual review and selection
-                    (default: fully automatic with AI-powered decisions)
+  --interactive, -i Full interactive mode (manual track selection and review)
   --raw             Raw rip mode - skip metadata lookup and AI mapping
                     Rips all tracks with simple names (discname_1.mp4, etc.)
-  --include-extras  Also rip extras (bonus features, behind-the-scenes, etc.)
-                    Movies: Only the main feature is ripped by default
-                    TV shows: Only episode tracks are ripped by default
+  --main-only       Only rip main content (skip extras/bonus features)
+                    Movies: Only the main feature (longest track)
+                    TV shows: Only episode tracks (AI-mapped)
   --dry-run         Create stub files instead of actual ripping
                     Useful for testing the workflow without waiting for encoding
   --help-dev        Show developer commands (make, npm, testing)
   --version, -v     Show version number
-
-Example:
-  juice-it --output /path/to/output --dvdSource /dev/disk5
-  juice-it --title "Cowboy Bebop"  # Search by title when disc name is cryptic
-  juice-it --include-extras        # Also rip bonus features/extras
-  juice-it --verbose  # Show detailed HandBrakeCLI output
-  juice-it --no-lookup  # Skip metadata lookup and use disc name
-  juice-it --rename-only --output ./output  # Rename existing files
-  juice-it --raw  # Quick raw rip without metadata or AI
 `);
 }
 

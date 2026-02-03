@@ -117,7 +117,7 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
  * @param {Object} params - Parameters for the prompt
  * @returns {{ system: string, user: string }} System and user prompts
  */
-function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata }) {
+function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [] }) {
     const episodes = metadata.episodes || [];
 
     // Build episode table (raw data, no analysis)
@@ -172,30 +172,61 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
     if (runtimeAnalysis) {
         const minValid = runtimeAnalysis.min - runtimeAnalysis.tolerance;
         const maxValid = runtimeAnalysis.max + runtimeAnalysis.tolerance;
+        const avgRuntime = runtimeAnalysis.avg;
 
         // Count tracks that fall in/out of the suggested range
         const inRangeCount = trackInfo.filter(t => t.duration >= minValid && t.duration <= maxValid).length;
         const outOfRangeCount = trackInfo.filter(t => t.duration > 0 && (t.duration < minValid || t.duration > maxValid)).length;
         const zeroTracks = trackInfo.filter(t => t.duration === 0).length;
 
-        const hints = [];
-        hints.push(`- Tracks with durations between **${minValid}-${maxValid} min** *might* be episodes (${inRangeCount} tracks fall in this range)`);
+        // Detect multi-episode track pattern (common in animated series)
+        const doubleEpMin = (avgRuntime * 2) - runtimeAnalysis.tolerance;
+        const doubleEpMax = (avgRuntime * 2) + runtimeAnalysis.tolerance;
+        const doubleEpTracks = trackInfo.filter(t => t.duration >= doubleEpMin && t.duration <= doubleEpMax).length;
 
-        if (outOfRangeCount > 0) {
-            hints.push(`- ${outOfRangeCount} track(s) have durations outside this range - these *could* be menus, extras, or bonus content, but use your judgment`);
+        // Detect "Play All" track (sum of all episode tracks or very long)
+        const sumOfNonZeroTracks = trackInfo.filter(t => t.duration > 0 && t.duration < avgRuntime * 3).reduce((sum, t) => sum + t.duration, 0);
+        const playAllCandidates = trackInfo.filter(t => t.duration > avgRuntime * 5 || (t.duration >= sumOfNonZeroTracks * 0.9 && t.duration <= sumOfNonZeroTracks * 1.1));
+
+        const hints = [];
+        hints.push(`- Tracks with durations between **${minValid}-${maxValid} min** *might* be single episodes (${inRangeCount} tracks fall in this range)`);
+
+        // Multi-episode pattern hint
+        if (doubleEpTracks > 0) {
+            hints.push(`- **MULTI-EPISODE PATTERN DETECTED**: ${doubleEpTracks} track(s) are ~${avgRuntime * 2} min (2× episode runtime of ${avgRuntime} min) - these likely contain 2 episodes each`);
+        }
+
+        // "Play All" track hint
+        if (playAllCandidates.length > 0) {
+            const playAllTracks = playAllCandidates.map(t => t.trackNum).join(', ');
+            hints.push(`- **PLAY ALL TRACK DETECTED**: Track(s) ${playAllTracks} appear to be "Play All" compilations - consider skipping these`);
+        }
+
+        if (outOfRangeCount > 0 && doubleEpTracks === 0) {
+            hints.push(`- ${outOfRangeCount} track(s) have durations outside the single-episode range - these *could* be menus, extras, or bonus content`);
         }
 
         if (zeroTracks > 0) {
             hints.push(`- ${zeroTracks} track(s) have 0 min duration - these are likely placeholders or failed scans`);
         }
 
-        hints.push(`- The show expects **${episodes.length} episodes** - you should aim to find this many matching tracks`);
+        hints.push(`- The show expects **${episodes.length} episodes** for this season - but this disc may only contain a portion of them`);
 
         if (lsdvdMetadata && lsdvdMetadata.longestTrack) {
-            hints.push(`- lsdvd indicates track ${lsdvdMetadata.longestTrack} is the longest - this *might* be a full-disc compilation or main feature`);
+            hints.push(`- lsdvd indicates track ${lsdvdMetadata.longestTrack} is the longest - this *might* be a "Play All" compilation`);
         }
 
         computationalHints = hints.join('\n');
+    }
+
+    // Build unrippable tracks warning section
+    let unrippableInfo = 'No tracks marked as unrippable.';
+    if (unrippableTracks && unrippableTracks.length > 0) {
+        unrippableInfo = `The following tracks are **unrippable** (copy-protected, stuck during scan, or 0 duration):
+
+**Track numbers**: ${unrippableTracks.join(', ')}
+
+⚠️ **CRITICAL**: Never suggest ripping these tracks. Always mark them as \`shouldSkip: true\` with reasoning "Unrippable track (copy-protected or invalid)".`;
     }
 
     const system = renderPrompt('track-mapping-system', {});
@@ -206,6 +237,7 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
         episodeTable: episodeTableFormatted,
         trackTable: trackTableFormatted,
         lsdvdInfo,
+        unrippableInfo,
         runtimeSummary,
         computationalHints
     });

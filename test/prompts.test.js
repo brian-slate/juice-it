@@ -367,6 +367,77 @@ function testTrackMappingSchemaSkipped() {
     console.log('  ✓ PASS\n');
 }
 
+function testTrackMappingSchemaWithExtraType() {
+    console.log('Test: TrackMappingSchema validates extraType and extraDescription for Play All');
+    setup();
+
+    // Play All compilation track
+    const playAllMapping = {
+        trackNum: 1,
+        trackDuration: 180,
+        episodeIndex: null,
+        episodeRuntime: null,
+        durationDifference: null,
+        shouldSkip: true,
+        extraType: 'other',
+        extraDescription: 'Play All',
+        confidence: 1.0,
+        reasoning: 'Play All compilation track - all episodes concatenated'
+    };
+
+    const result = TrackMappingSchema.safeParse(playAllMapping);
+    assert.strictEqual(result.success, true, 'Play All mapping with extraType should pass');
+    assert.strictEqual(result.data.extraType, 'other', 'extraType should be "other"');
+    assert.strictEqual(result.data.extraDescription, 'Play All', 'extraDescription should be "Play All"');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTrackMappingSchemaExtraTypeValidation() {
+    console.log('Test: TrackMappingSchema validates all valid extraType values');
+    setup();
+
+    const validTypes = ['behindthescenes', 'deleted', 'featurette', 'interview', 'scene', 'short', 'trailer', 'other'];
+
+    validTypes.forEach(type => {
+        const mapping = {
+            trackNum: 1,
+            trackDuration: 10,
+            episodeIndex: null,
+            episodeRuntime: null,
+            durationDifference: null,
+            shouldSkip: true,
+            extraType: type,
+            extraDescription: `Test ${type}`,
+            confidence: 0.9,
+            reasoning: `Test for ${type}`
+        };
+
+        const result = TrackMappingSchema.safeParse(mapping);
+        assert.strictEqual(result.success, true, `extraType "${type}" should be valid`);
+    });
+
+    // Test invalid extraType
+    const invalidMapping = {
+        trackNum: 1,
+        trackDuration: 10,
+        episodeIndex: null,
+        episodeRuntime: null,
+        durationDifference: null,
+        shouldSkip: true,
+        extraType: 'invalid_type',
+        confidence: 0.9,
+        reasoning: 'Test'
+    };
+
+    const invalidResult = TrackMappingSchema.safeParse(invalidMapping);
+    assert.strictEqual(invalidResult.success, false, 'Invalid extraType should fail validation');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
 function testTrackMappingResponseSchemaValid() {
     console.log('Test: TrackMappingResponseSchema validates complete response');
     setup();
@@ -654,6 +725,26 @@ function testBuildTrackMappingWithLsdvd() {
     console.log('  ✓ PASS\n');
 }
 
+function testTrackMappingPromptContainsExtraTypeGuidance() {
+    console.log('Test: Track mapping system prompt contains Play All and extraType guidance');
+    setup();
+
+    const systemPrompt = loadTemplate('track-mapping-system');
+
+    // Check for Play All guidance
+    assert.strictEqual(systemPrompt.includes('Play All'), true, 'System prompt should mention Play All');
+    assert.strictEqual(systemPrompt.includes('extraType'), true, 'System prompt should mention extraType');
+    assert.strictEqual(systemPrompt.includes('extraDescription'), true, 'System prompt should mention extraDescription');
+
+    // Check for valid extra types
+    assert.strictEqual(systemPrompt.includes('"other"'), true, 'System prompt should mention "other" extra type');
+    assert.strictEqual(systemPrompt.includes('"featurette"'), true, 'System prompt should mention "featurette" extra type');
+    assert.strictEqual(systemPrompt.includes('"deleted"'), true, 'System prompt should mention "deleted" extra type');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
 function testOptionCNoPreLabeling() {
     console.log('Test: Option C prompts do NOT include pre-computed CANDIDATE/SKIP labels');
     setup();
@@ -718,6 +809,8 @@ try {
     testTmdbMatchSchemaInvalidConfidence();
     testTrackMappingSchemaValid();
     testTrackMappingSchemaSkipped();
+    testTrackMappingSchemaWithExtraType();
+    testTrackMappingSchemaExtraTypeValidation();
     testTrackMappingResponseSchemaValid();
     testTrackMappingResponseSchemaMissingField();
     testRuntimeAnalysisSchemaValid();
@@ -733,6 +826,9 @@ try {
     // Option C Tests (lsdvd and soft guidance)
     testBuildTrackMappingWithLsdvd();
     testOptionCNoPreLabeling();
+
+    // Extra Type Tests (Play All, etc.)
+    testTrackMappingPromptContainsExtraTypeGuidance();
 
     console.log('━'.repeat(60));
     console.log('  ✅ All prompt/schema tests passed!');

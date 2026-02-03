@@ -7,7 +7,8 @@ const {
     sanitizeForPlex,
     calculateProposedName,
     buildBaseFileName,
-    buildExtrasFileName
+    buildExtrasFileName,
+    buildPlexFolderPath
 } = require('../lib/naming');
 
 console.log('\n━━━ Plex Naming Tests ━━━\n');
@@ -266,6 +267,100 @@ function testBuildExtrasFileName() {
     console.log('  ✓ PASS\n');
 }
 
+function testBuildExtrasFileNameWithDescription() {
+    console.log('Test: buildExtrasFileName with custom description (Play All, etc.)');
+
+    // Play All compilation track with 'other' type
+    const result1 = buildExtrasFileName('Ed, Edd n Eddy (1999)', 1, 'other', 'Play All');
+    assert.strictEqual(result1, 'Ed, Edd n Eddy (1999)-other-Play All.mp4');
+
+    // Behind the scenes with custom description
+    const result2 = buildExtrasFileName('Avatar (2009)', 2, 'behindthescenes', 'Making of Avatar');
+    assert.strictEqual(result2, 'Avatar (2009)-behindthescenes-Making of Avatar.mp4');
+
+    // Trailer with description
+    const result3 = buildExtrasFileName('Movie Name (2024)', 1, 'trailer', 'Theatrical Trailer');
+    assert.strictEqual(result3, 'Movie Name (2024)-trailer-Theatrical Trailer.mp4');
+
+    // Null description should fall back to "Bonus X"
+    const result4 = buildExtrasFileName('Movie Name (2024)', 3, 'featurette', null);
+    assert.strictEqual(result4, 'Movie Name (2024)-featurette-Bonus 3.mp4');
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// buildPlexFolderPath() Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('━━━ buildPlexFolderPath() Tests ━━━\n');
+
+function testPlexFolderPathTV() {
+    console.log('Test: buildPlexFolderPath for TV show with TMDB ID');
+
+    const metadata = {
+        type: 'tv',
+        tmdbId: 606,
+        name: 'Ed, Edd n Eddy',
+        year: '1999',
+        season: 1
+    };
+    const result = buildPlexFolderPath(metadata);
+
+    assert.strictEqual(result.showFolder, 'Ed, Edd n Eddy (1999) {tmdb-606}');
+    assert.strictEqual(result.seasonFolder, 'Season 01');
+    assert.strictEqual(result.fullPath, 'Ed, Edd n Eddy (1999) {tmdb-606}/Season 01/');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testPlexFolderPathMovie() {
+    console.log('Test: buildPlexFolderPath for movie with TMDB ID');
+
+    const metadata = {
+        type: 'movie',
+        tmdbId: 19995,
+        name: 'Avatar',
+        year: '2009'
+    };
+    const result = buildPlexFolderPath(metadata);
+
+    assert.strictEqual(result.showFolder, 'Avatar (2009) {tmdb-19995}');
+    assert.strictEqual(result.seasonFolder, null);
+    assert.strictEqual(result.fullPath, 'Avatar (2009) {tmdb-19995}/');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testPlexFolderPathWithoutTmdbId() {
+    console.log('Test: buildPlexFolderPath without TMDB ID');
+
+    const metadata = {
+        type: 'tv',
+        name: 'Some Show',
+        year: '2020',
+        season: 3
+    };
+    const result = buildPlexFolderPath(metadata);
+
+    // Should work without ID, just no {tmdb-xxx} suffix
+    assert.strictEqual(result.showFolder, 'Some Show (2020)');
+    assert.strictEqual(result.seasonFolder, 'Season 03');
+    assert.strictEqual(result.fullPath, 'Some Show (2020)/Season 03/');
+
+    console.log('  ✓ PASS\n');
+}
+
+function testPlexFolderPathNullMetadata() {
+    console.log('Test: buildPlexFolderPath with null/invalid metadata');
+
+    assert.strictEqual(buildPlexFolderPath(null), null);
+    assert.strictEqual(buildPlexFolderPath({}), null);
+    assert.strictEqual(buildPlexFolderPath({ type: 'custom' }), null);
+
+    console.log('  ✓ PASS\n');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Run all tests
 // ═══════════════════════════════════════════════════════════════════════════
@@ -294,6 +389,13 @@ try {
 
     // buildExtrasFileName tests
     testBuildExtrasFileName();
+    testBuildExtrasFileNameWithDescription();
+
+    // buildPlexFolderPath tests
+    testPlexFolderPathTV();
+    testPlexFolderPathMovie();
+    testPlexFolderPathWithoutTmdbId();
+    testPlexFolderPathNullMetadata();
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  ✅ All Plex naming tests passed!');

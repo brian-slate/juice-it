@@ -53,15 +53,17 @@ console.log('\n━━━ End-to-End Dry-Run Tests ━━━\n');
 // ═══════════════════════════════════════════════════════════════════════════
 
 function testHelpCommand() {
-    console.log('Test: --help command displays dry-run option');
+    console.log('Test: --help command displays correct usage');
     setup();
 
     const result = runJuiceIt(['--help']);
 
     assert.strictEqual(result.exitCode, 0, 'Help should exit with code 0');
     assert(result.stdout.includes('--dry-run'), 'Help should mention --dry-run flag');
-    assert(result.stdout.includes('--include-extras'), 'Help should mention --include-extras flag');
-    assert(result.stdout.includes('stub files'), 'Help should explain dry-run creates stub files');
+    assert(result.stdout.includes('--main-only'), 'Help should mention --main-only flag');
+    assert(result.stdout.includes('Guided selection'), 'Help should explain guided selection mode');
+    assert(result.stdout.includes('"title or show info"'), 'Help should show positional argument usage');
+    assert(!result.stdout.includes('--title'), 'Help should NOT mention removed --title flag');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -107,9 +109,15 @@ function testUnknownFlagRejected() {
     assert.strictEqual(result2.exitCode, 1, 'Unknown short flag should exit with code 1');
     assert(result2.stderr.includes('Unknown option'), 'Should show "Unknown option" error for short flag');
 
+    // Test that --title is now rejected (replaced by positional arguments)
+    const result3 = runJuiceIt(['--title', 'Test Movie']);
+    assert.strictEqual(result3.exitCode, 1, '--title flag should be rejected');
+    assert(result3.stderr.includes('Unknown option'), '--title should show "Unknown option" error');
+    assert(result3.stderr.includes('--title'), 'Error should mention --title');
+
     // Ensure valid flags still work
-    const result3 = runJuiceIt(['--version']);
-    assert.strictEqual(result3.exitCode, 0, 'Valid flag --version should exit with code 0');
+    const result4 = runJuiceIt(['--version']);
+    assert.strictEqual(result4.exitCode, 0, 'Valid flag --version should exit with code 0');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -211,28 +219,28 @@ function testPlexNamingInCode() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test: Include-extras flag works
+// Test: Main-only flag works
 // ═══════════════════════════════════════════════════════════════════════════
 
-function testIncludeExtrasFlag() {
-    console.log('Test: --include-extras flag is properly implemented');
+function testMainOnlyFlag() {
+    console.log('Test: --main-only flag is properly implemented');
 
     const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
 
-    // Check that include-extras option is parsed
+    // Check that main-only option is parsed
     assert(
-        juiceItContent.includes("'--include-extras'"),
-        'juiceit.js should parse --include-extras flag'
+        juiceItContent.includes("'--main-only'"),
+        'juiceit.js should parse --main-only flag'
     );
     assert(
-        juiceItContent.includes('options.includeExtras'),
-        'juiceit.js should set options.includeExtras'
+        juiceItContent.includes('options.mainOnly'),
+        'juiceit.js should set options.mainOnly'
     );
 
-    // Check that skip status is overridden when includeExtras is true
+    // Check that mainOnly is used to skip extras
     assert(
-        juiceItContent.includes("if (options.includeExtras)"),
-        'juiceit.js should handle includeExtras option'
+        juiceItContent.includes("options.mainOnly"),
+        'juiceit.js should handle mainOnly option'
     );
 
     console.log('  ✓ PASS\n');
@@ -281,14 +289,46 @@ function testSummaryShowsSkippedTracks() {
         'Summary should mention tracks not ripped'
     );
 
-    // Check that re-run guidance is shown
-    assert(
-        juiceItContent.includes('juiceit --include-extras'),
-        'Summary should show --include-extras guidance'
-    );
+    // Check that re-run guidance is shown (raw mode alternative)
     assert(
         juiceItContent.includes('juiceit --raw'),
         'Summary should show --raw as alternative'
+    );
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Test: Positional argument support for search query
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testPositionalArgumentSupport() {
+    console.log('Test: Positional argument support is implemented');
+
+    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+
+    // Check that positional arguments are collected
+    assert(
+        juiceItContent.includes('positionalArgs'),
+        'juiceit.js should collect positional arguments'
+    );
+
+    // Check that searchQuery is set from positional args
+    assert(
+        juiceItContent.includes('options.searchQuery'),
+        'juiceit.js should set options.searchQuery'
+    );
+
+    // Check that guidedMetadataSelection function exists
+    assert(
+        juiceItContent.includes('guidedMetadataSelection'),
+        'juiceit.js should have guidedMetadataSelection function'
+    );
+
+    // Check that naked invocation routes to guided selection
+    assert(
+        juiceItContent.includes('!hasUserQuery && !isInteractive'),
+        'juiceit.js should detect naked invocations'
     );
 
     console.log('  ✓ PASS\n');
@@ -305,9 +345,10 @@ try {
     testNamingModuleIntegration();
     testDryRunFlagRecognized();
     testPlexNamingInCode();
-    testIncludeExtrasFlag();
+    testMainOnlyFlag();
     testSkippedTracksTracking();
     testSummaryShowsSkippedTracks();
+    testPositionalArgumentSupport();
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  ✅ All end-to-end tests passed!');
