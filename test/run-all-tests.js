@@ -14,7 +14,12 @@ const testFiles = [
     'runtime-analysis.test.js',
     'openai-api.test.js',
     'naming.test.js',
-    'e2e-dry-run.test.js'
+    'cli.test.js',
+    'disc.test.js',
+    'rename.test.js',
+    'handbrake.test.js',
+    'e2e-dry-run.test.js',
+    'interactive-mode.test.js'
 ];
 
 console.log('');

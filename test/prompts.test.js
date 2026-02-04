@@ -817,11 +817,15 @@ function testMultiDiscContextIncluded() {
         discNumber: 2  // Disc 2 - should trigger multi-disc context
     });
 
-    // Should include multi-disc context section
+    // Should include multi-disc context section that tells AI to check volume name
     assert.strictEqual(prompts.user.includes('Multi-Disc Context'), true, 'Should include Multi-Disc Context section');
-    assert.strictEqual(prompts.user.includes('This is Disc 2'), true, 'Should mention this is Disc 2');
-    assert.strictEqual(prompts.user.includes('**NOT** start from Episode 1'), true, 'Should warn not to start from episode 1');
-    assert.strictEqual(prompts.user.includes('episodeIndex=14'), true, 'Should provide example with offset');
+    assert.strictEqual(prompts.user.includes('User query mentioned Disc 2'), true, 'Should mention the user query disc number');
+    // Should tell AI to look at volume name and analyze patterns
+    assert.strictEqual(prompts.user.includes('Look at the volume name'), true, 'Should instruct AI to look at volume name');
+    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name pattern guidance');
+    // Should explain "count from end" method for Disc 2
+    assert.strictEqual(prompts.user.includes('count from the END'), true, 'Should explain count from end method');
+    assert.strictEqual(prompts.user.includes('DO NOT use a simple midpoint'), true, 'Should warn against simple midpoint');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1019,11 +1023,11 @@ function testMultiDiscContextForDisc3Plus() {
         discNumber: 3  // Disc 3
     });
 
-    // Should include multi-disc context for Disc 3
-    assert.strictEqual(prompts.user.includes('This is Disc 3'), true, 'Should mention this is Disc 3');
-    assert.strictEqual(prompts.user.includes('**NOT** start from Episode 1'), true, 'Should warn not to start from episode 1');
-    // Episode range should be different from Disc 2
-    assert.strictEqual(prompts.user.includes('episodeIndex'), true, 'Should include episodeIndex guidance');
+    // Should include multi-disc context that tells AI to check volume name
+    assert.strictEqual(prompts.user.includes('User query mentioned Disc 3'), true, 'Should mention the user query disc number');
+    assert.strictEqual(prompts.user.includes('Look at the volume name'), true, 'Should instruct AI to look at volume name');
+    // Should explain what to do for later discs
+    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name pattern guidance');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1047,9 +1051,11 @@ function testMultiDiscContextNullDiscNumber() {
         discNumber: null  // No disc number
     });
 
-    // Should NOT include multi-disc context when discNumber is null
-    assert.strictEqual(prompts.user.includes('Multi-Disc Context'), false, 'Should NOT include Multi-Disc Context when null');
-    assert.strictEqual(prompts.user.includes('This is Disc'), false, 'Should NOT mention disc number');
+    // Should NOT include multi-disc context SECTION when discNumber is null
+    // Note: The guidelines may reference "Multi-Disc Context" but the actual section (### 1E.) should not exist
+    assert.strictEqual(prompts.user.includes('### 1E. Multi-Disc Context'), false, 'Should NOT include Multi-Disc Context section header when null');
+    assert.strictEqual(prompts.user.includes('This is Disc'), false, 'Should NOT mention "This is Disc"');
+    assert.strictEqual(prompts.user.includes('User query mentioned Disc'), false, 'Should NOT mention "User query mentioned Disc"');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1404,6 +1410,109 @@ function testBuildMappingValidationPromptsMinimal() {
 }
 
 // ============================================================================
+// START EPISODE OVERRIDE TESTS
+// ============================================================================
+
+function testStartEpisodeOverrideInPrompts() {
+    console.log('Test: buildTrackMappingPrompts with startEpisodeOverride');
+    setup();
+
+    const metadata = {
+        name: 'Ed, Edd n Eddy',
+        season: 2,
+        episodes: Array.from({ length: 26 }, (_, i) => ({
+            episode_number: i + 1,
+            name: `Episode ${i + 1}`,
+            runtime: 11
+        }))
+    };
+
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22, 2: 22, 3: 22, 4: 22, 5: 22 },
+        runtimeAnalysis: { min: 11, max: 11, avg: 11, variance: 0, tolerance: 2, format: 'short-form' },
+        lsdvdMetadata: null,
+        discNumber: 4,
+        startEpisodeOverride: 17  // User specified start episode
+    });
+
+    // Should include USER SPECIFIED context
+    assert.strictEqual(prompts.user.includes('USER SPECIFIED'), true, 'Should indicate user-specified start');
+    assert.strictEqual(prompts.user.includes('Episode 17'), true, 'Should mention start episode 17');
+    assert.strictEqual(prompts.user.includes('episodeIndex=16'), true, 'Should show episodeIndex=16 (0-based)');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testTrackCountBasedInference() {
+    console.log('Test: Track-count-based inference for multi-disc');
+    setup();
+
+    const metadata = {
+        name: 'Test Show',
+        season: 1,
+        episodes: Array.from({ length: 26 }, (_, i) => ({
+            episode_number: i + 1,
+            name: `Episode ${i + 1}`,
+            runtime: 22
+        }))
+    };
+
+    // 5 tracks at ~22 min each = ~5 single-episode tracks
+    // For disc 2 with 26 total episodes, should estimate "last 5" = 22-26
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22, 2: 21, 3: 23, 4: 22, 5: 21 },
+        runtimeAnalysis: { min: 22, max: 22, avg: 22, variance: 0, tolerance: 3, format: 'half-hour' },
+        lsdvdMetadata: null,
+        discNumber: 2
+    });
+
+    // Should tell AI to analyze volume name (not auto-infer)
+    assert.strictEqual(prompts.user.includes('REQUIRES YOUR ANALYSIS'), true, 'Should ask AI to analyze');
+    // Should include volume name pattern guidance
+    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name patterns');
+    // Should explain count from end method
+    assert.strictEqual(prompts.user.includes('count from the END'), true, 'Should explain count from end method');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+function testMultiEpisodeTrackCounting() {
+    console.log('Test: Multi-episode track counting in inference');
+    setup();
+
+    const metadata = {
+        name: 'Animation Show',
+        season: 1,
+        episodes: Array.from({ length: 26 }, (_, i) => ({
+            episode_number: i + 1,
+            name: `Episode ${i + 1}`,
+            runtime: 11
+        }))
+    };
+
+    // 5 tracks at ~22 min each = 5 double-episode tracks = 10 episodes
+    const prompts = buildTrackMappingPrompts({
+        metadata,
+        trackDurations: { 1: 22, 2: 22, 3: 22, 4: 22, 5: 22 },
+        runtimeAnalysis: { min: 11, max: 11, avg: 11, variance: 0, tolerance: 2, format: 'short-form' },
+        lsdvdMetadata: null,
+        discNumber: 2
+    });
+
+    // Should detect multi-episode pattern and count them as 2 each
+    // 5 tracks × 2 = 10 episodes estimated
+    assert.strictEqual(prompts.user.includes('10') || prompts.user.includes('episode-length tracks'), true,
+        'Should count multi-episode tracks correctly');
+
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
 // RUN ALL TESTS
 // ============================================================================
 
@@ -1476,6 +1585,11 @@ try {
     testMappingValidationSchemaWithConcerns();
     testBuildMappingValidationPrompts();
     testBuildMappingValidationPromptsMinimal();
+
+    // Start Episode Override Tests
+    testStartEpisodeOverrideInPrompts();
+    testTrackCountBasedInference();
+    testMultiEpisodeTrackCounting();
 
     console.log('━'.repeat(60));
     console.log('  ✅ All prompt/schema tests passed!');

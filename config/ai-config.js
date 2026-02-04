@@ -13,9 +13,10 @@ module.exports = {
     /**
      * The OpenAI model to use for all AI operations.
      * Options: 'gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'
-     * gpt-4o-mini is recommended for cost-effectiveness (~$0.001/disc)
+     * gpt-4o is recommended for complex multi-disc reasoning
+     * gpt-4o-mini is cheaper but may miss disc context instructions
      */
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
 
     /**
      * Temperature controls randomness in responses.

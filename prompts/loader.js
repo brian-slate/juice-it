@@ -161,9 +161,12 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
 /**
  * Build the track mapping prompts (Option C: Raw data + soft guidance)
  * @param {Object} params - Parameters for the prompt
+ * @param {string|null} params.volumeName - DVD volume name (may contain disc info like S3D1)
+ * @param {number|null} params.discNumber - User-specified disc number (may be overall box set number)
+ * @param {number|null} params.startEpisodeOverride - User-specified starting episode (1-based)
  * @returns {{ system: string, user: string }} System and user prompts
  */
-function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], discNumber = null }) {
+function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], volumeName = null, discNumber = null, startEpisodeOverride = null }) {
     const episodes = metadata.episodes || [];
     const totalEpisodes = episodes.length;
 
@@ -277,27 +280,84 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
     }
 
     // Build disc context section for multi-disc sets
+    // Use track-count-based inference instead of assuming 2-disc sets
     let discContext = '';
-    if (discNumber && discNumber > 1 && totalEpisodes > 0) {
-        // Estimate which episodes this disc likely contains
-        // Assuming roughly equal episodes per disc, earlier discs would have handled earlier episodes
-        const avgEpisodesPerDisc = Math.ceil(totalEpisodes / 2); // Conservative estimate for 2-disc set
-        const estimatedStartEpisode = (discNumber - 1) * avgEpisodesPerDisc + 1;
-        const estimatedEndEpisode = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
 
-        discContext = `### 1E. Multi-Disc Context (CRITICAL)
+    // Count episode-like tracks to infer how many episodes are on this disc
+    let estimatedEpisodeCount = 0;
+    if (runtimeAnalysis && runtimeAnalysis.avg > 0) {
+        const avgRuntime = runtimeAnalysis.avg;
+        const tolerance = runtimeAnalysis.tolerance || 5;
 
-**This is Disc ${discNumber}** of a multi-disc set for Season ${metadata.season}.
+        // Count single-episode tracks
+        const singleEpTracks = trackInfo.filter(t =>
+            t.duration >= avgRuntime - tolerance && t.duration <= avgRuntime + tolerance
+        ).length;
 
-⚠️ **IMPORTANT**: Since this is NOT Disc 1, earlier episodes were likely on previous disc(s).
-- Season ${metadata.season} has ${totalEpisodes} total episodes
-- For Disc ${discNumber}, episodes should **NOT** start from Episode 1
-- Estimate: This disc likely contains episodes **${estimatedStartEpisode}-${estimatedEndEpisode}** (or similar range)
-- The \`episodeIndex\` values should reflect this offset (e.g., if starting at episode 15, use episodeIndex=14)
+        // Count multi-episode tracks (2x average runtime)
+        const multiEpTracks = trackInfo.filter(t =>
+            t.duration >= avgRuntime * 2 - tolerance && t.duration <= avgRuntime * 2 + tolerance
+        ).length;
 
-Example for Disc 2 of a 26-episode season:
-- If Disc 1 had episodes 1-14, Disc 2 should have episodes 15-26
-- Track 2 would map to episodeIndex=14 (episode 15), NOT episodeIndex=0 (episode 1)
+        estimatedEpisodeCount = singleEpTracks + (multiEpTracks * 2);
+    }
+
+    // Handle user-specified start episode override
+    if (startEpisodeOverride && startEpisodeOverride > 0 && totalEpisodes > 0) {
+        const endEpisode = Math.min(startEpisodeOverride + Math.max(estimatedEpisodeCount, 1) - 1, totalEpisodes);
+        discContext = `### 1E. Multi-Disc Context (USER SPECIFIED)
+
+**User confirmed**: Episodes start at Episode ${startEpisodeOverride}.
+Map tracks to Episodes ${startEpisodeOverride}-${endEpisode}.
+First episode track should use episodeIndex=${startEpisodeOverride - 1}.
+
+Season ${metadata.season} has ${totalEpisodes} total episodes.
+`;
+    } else if (discNumber && discNumber > 1 && totalEpisodes > 0) {
+        // Auto-infer using track-count-based logic (not assuming 2-disc sets)
+        let startEstimate, endEstimate;
+
+        if (estimatedEpisodeCount > 0) {
+            // Infer: later disc = later episodes
+            // For disc N, estimate the "last X" episodes where X = episode count on disc
+            endEstimate = totalEpisodes;
+            startEstimate = Math.max(1, totalEpisodes - estimatedEpisodeCount + 1);
+        } else {
+            // Fallback: divide episodes evenly (but don't assume 2 discs)
+            // Use disc number as a rough guide
+            const estimatedDiscsInSeason = Math.max(discNumber, 2);
+            const avgEpisodesPerDisc = Math.ceil(totalEpisodes / estimatedDiscsInSeason);
+            startEstimate = (discNumber - 1) * avgEpisodesPerDisc + 1;
+            endEstimate = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
+        }
+
+        discContext = `### 1E. Multi-Disc Context (REQUIRES YOUR ANALYSIS)
+
+**User query mentioned Disc ${discNumber}** for Season ${metadata.season}. IGNORE the user's disc number - check the **DVD Volume Name** above instead.
+
+⚠️ **CRITICAL ANALYSIS REQUIRED**:
+1. **Look at the volume name** and find the disc indicator (DISC_ONE, DISC_TWO, D1, D2, S#D#, etc.)
+2. **That disc number applies to Season ${metadata.season}** (the user's specified season)
+3. **Calculate starting episode using the "count from end" method** (explained below)
+
+**Volume Name Patterns**:
+- \`DISC_ONE\`, \`DISC_1\`, \`D1\`, \`S${metadata.season}D1\` → Disc 1 of Season ${metadata.season} → start at Episode 1
+- \`DISC_TWO\`, \`DISC_2\`, \`D2\`, \`S${metadata.season}D2\` → Disc 2 (likely LAST disc) of Season ${metadata.season}
+
+**Season ${metadata.season} has ${totalEpisodes} episodes total.**
+
+**If volume name indicates Disc 1:**
+- Episodes start from Episode 1 (episodeIndex=0)
+
+**If volume name indicates Disc 2 (or the last disc of the season):**
+1. First, count how many episode-length tracks are on THIS disc (look at the track table above)
+2. Calculate total episodes on this disc (e.g., 5 tracks × 2 episodes per track = 10 episodes)
+3. **Calculate: startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1**
+4. Example: If season has 26 episodes and disc has 10 episodes → 26 - 10 + 1 = 17 → start at Episode 17
+5. DO NOT use a simple midpoint - count from the END of the season!
+
+**If volume name indicates Disc 3+:**
+- Use similar "count from end" logic for multi-disc splits
 `;
     } else if (discNumber === 1) {
         discContext = `### 1E. Multi-Disc Context
@@ -311,6 +371,7 @@ Example for Disc 2 of a 26-episode season:
         showName: metadata.name,
         season: metadata.season,
         episodeCount: totalEpisodes,
+        volumeName: volumeName || 'unknown',
         episodeTable: episodeTableFormatted,
         trackTable: trackTableFormatted,
         lsdvdInfo,
@@ -461,6 +522,17 @@ function buildMappingValidationPrompts({
     return { system, user };
 }
 
+/**
+ * Build the query extraction prompts
+ * @param {string} userQuery - The user's raw query
+ * @returns {{ system: string, user: string }} System and user prompts
+ */
+function buildQueryExtractionPrompts(userQuery) {
+    const system = loadTemplate('query-extraction-system');
+    const user = `Extract the TMDB search information from this user query: "${userQuery}"`;
+    return { system, user };
+}
+
 module.exports = {
     loadTemplate,
     interpolate,
@@ -468,5 +540,6 @@ module.exports = {
     clearCache,
     buildTmdbMatchPrompts,
     buildTrackMappingPrompts,
-    buildMappingValidationPrompts
+    buildMappingValidationPrompts,
+    buildQueryExtractionPrompts
 };

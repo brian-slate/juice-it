@@ -1,0 +1,26 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🎬 JuiceIt installed successfully!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quick Start:
+    juiceit "Show Name season 1"    # Rip with metadata
+    juiceit --raw                   # Rip without metadata
+
+  First Run:
+    On first use, JuiceIt will guide you through setup.
+
+    For smart episode naming (recommended), you'll need:
+    • OpenAI API key (~$0.01/disc) - https://platform.openai.com
+
+    TMDB (for metadata) is FREE and included by default.
+
+  Manual Setup:
+    juiceit --setup
+
+  Documentation:
+    juiceit --help
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

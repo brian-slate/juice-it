@@ -154,11 +154,12 @@ function testZodSchemaConversion() {
 console.log('━━━ Integration Path Tests ━━━\n');
 
 function testCorrectApiPathInCode() {
-    console.log('Test: juiceit.js uses correct API path (chat.completions.parse)');
+    console.log('Test: lib/ai.js uses correct API path (chat.completions.parse)');
 
     const fs = require('fs');
-    const juiceitPath = path.join(__dirname, '../juiceit.js');
-    const content = fs.readFileSync(juiceitPath, 'utf8');
+    // AI code is now in lib/ai.js (modularized from juiceit.js)
+    const aiModulePath = path.join(__dirname, '../lib/ai.js');
+    const content = fs.readFileSync(aiModulePath, 'utf8');
 
     // Should use chat.completions.parse, NOT beta.chat.completions.parse
     const usesCorrectPath = content.includes('openai.chat.completions.parse');
@@ -173,13 +174,14 @@ function testCorrectApiPathInCode() {
 }
 
 function testZodImportInCode() {
-    console.log('Test: juiceit.js imports Zod correctly');
+    console.log('Test: lib/ai.js imports Zod correctly');
 
     const fs = require('fs');
-    const juiceitPath = path.join(__dirname, '../juiceit.js');
-    const content = fs.readFileSync(juiceitPath, 'utf8');
+    // AI code is now in lib/ai.js (modularized from juiceit.js)
+    const aiModulePath = path.join(__dirname, '../lib/ai.js');
+    const content = fs.readFileSync(aiModulePath, 'utf8');
 
-    // juiceit.js imports zodResponseFormat from openai/helpers/zod
+    // lib/ai.js imports zodResponseFormat from openai/helpers/zod
     // (Zod schemas are defined in prompts/schemas.js which imports 'zod' directly)
     const importsZodHelper = content.includes('zodResponseFormat');
     const importsFromOpenAI = content.includes("require('openai/helpers/zod')") ||
@@ -260,13 +262,14 @@ function testAiConfigHasRequiredFields() {
 }
 
 function testAiConfigUsedInCode() {
-    console.log('Test: juiceit.js imports and uses AI config');
+    console.log('Test: lib/ai.js imports and uses AI config');
 
     const fs = require('fs');
-    const juiceitPath = path.join(__dirname, '../juiceit.js');
-    const content = fs.readFileSync(juiceitPath, 'utf8');
+    // AI code is now in lib/ai.js (modularized from juiceit.js)
+    const aiModulePath = path.join(__dirname, '../lib/ai.js');
+    const content = fs.readFileSync(aiModulePath, 'utf8');
 
-    const importsConfig = content.includes("require('./config/ai-config')");
+    const importsConfig = content.includes("require('../config/ai-config')");
     const usesModel = content.includes('aiConfig.model');
     const usesTemperature = content.includes('aiConfig.temperature');
     const usesSchemaNames = content.includes('aiConfig.schemaNames');

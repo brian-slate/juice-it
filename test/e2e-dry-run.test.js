@@ -160,26 +160,30 @@ function testNamingModuleIntegration() {
 function testDryRunFlagRecognized() {
     console.log('Test: --dry-run flag is recognized in arguments');
 
-    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    const cliContent = fs.readFileSync(path.join(__dirname, '../lib/cli.js'), 'utf-8');
 
-    // Check that dry-run option is parsed
+    // Check that dry-run option is parsed (now in cli module)
     assert(
-        juiceItContent.includes("'--dry-run'"),
-        'juiceit.js should parse --dry-run flag'
+        cliContent.includes("'--dry-run'"),
+        'cli module should parse --dry-run flag'
     );
     assert(
-        juiceItContent.includes('options.dryRun'),
-        'juiceit.js should set options.dryRun'
+        cliContent.includes('options.dryRun'),
+        'cli module should set options.dryRun'
     );
 
-    // Check that dry-run mode creates stub files
+    // Check that dry-run mode creates stub files (now in handbrake module)
+    const handbrakeContent = fs.readFileSync(path.join(__dirname, '../lib/handbrake.js'), 'utf-8');
     assert(
-        juiceItContent.includes('[DRY-RUN]'),
-        'juiceit.js should have dry-run logging'
+        handbrakeContent.includes('[DRY-RUN]'),
+        'handbrake module should have dry-run logging'
     );
+
+    // Check that dry-run mode displays message (now in rip module)
+    const ripContent = fs.readFileSync(path.join(__dirname, '../lib/rip.js'), 'utf-8');
     assert(
-        juiceItContent.includes('DRY-RUN MODE'),
-        'juiceit.js should display dry-run mode message'
+        ripContent.includes('DRY-RUN MODE'),
+        'rip module should display dry-run mode message'
     );
 
     console.log('  ✓ PASS\n');
@@ -192,7 +196,6 @@ function testDryRunFlagRecognized() {
 function testPlexNamingInCode() {
     console.log('Test: Plex naming format is used throughout codebase');
 
-    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
     const namingContent = fs.readFileSync(path.join(__dirname, '../lib/naming.js'), 'utf-8');
 
     // Check naming module has correct Plex format
@@ -209,10 +212,11 @@ function testPlexNamingInCode() {
         'Naming module should have Plex-compatible extras naming (featurette-Bonus)'
     );
 
-    // Check that year is stored for TV shows
+    // Check that year is stored for TV shows (now in metadata module)
+    const metadataContent = fs.readFileSync(path.join(__dirname, '../lib/metadata.js'), 'utf-8');
     assert(
-        juiceItContent.includes("year: showYear") || juiceItContent.includes("year: show.first_air_date"),
-        'juiceit.js should store year for TV shows'
+        metadataContent.includes("year: showYear") || metadataContent.includes("year: show.first_air_date"),
+        'metadata module should store year for TV shows'
     );
 
     console.log('  ✓ PASS\n');
@@ -226,15 +230,16 @@ function testMainOnlyFlag() {
     console.log('Test: --main-only flag is properly implemented');
 
     const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    const cliContent = fs.readFileSync(path.join(__dirname, '../lib/cli.js'), 'utf-8');
 
-    // Check that main-only option is parsed
+    // Check that main-only option is parsed (now in cli module)
     assert(
-        juiceItContent.includes("'--main-only'"),
-        'juiceit.js should parse --main-only flag'
+        cliContent.includes("'--main-only'"),
+        'cli module should parse --main-only flag'
     );
     assert(
-        juiceItContent.includes('options.mainOnly'),
-        'juiceit.js should set options.mainOnly'
+        cliContent.includes('options.mainOnly'),
+        'cli module should set options.mainOnly'
     );
 
     // Check that mainOnly is used to skip extras
@@ -253,22 +258,23 @@ function testMainOnlyFlag() {
 function testSkippedTracksTracking() {
     console.log('Test: Mapping-skipped tracks are tracked separately');
 
-    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    // Skipped tracks are now tracked in lib/rip.js module
+    const ripContent = fs.readFileSync(path.join(__dirname, '../lib/rip.js'), 'utf-8');
 
     // Check that both arrays exist
     assert(
-        juiceItContent.includes('skippedTracks'),
-        'juiceit.js should have skippedTracks array'
+        ripContent.includes('skippedTracks'),
+        'rip module should have skippedTracks array'
     );
     assert(
-        juiceItContent.includes('mappingSkippedTracks'),
-        'juiceit.js should have mappingSkippedTracks array'
+        ripContent.includes('mappingSkippedTracks'),
+        'rip module should have mappingSkippedTracks array'
     );
 
     // Check that mapping-skipped tracks are tracked
     assert(
-        juiceItContent.includes('mappingSkippedTracks.push'),
-        'juiceit.js should push to mappingSkippedTracks'
+        ripContent.includes('mappingSkippedTracks.push'),
+        'rip module should push to mappingSkippedTracks'
     );
 
     console.log('  ✓ PASS\n');
@@ -281,17 +287,18 @@ function testSkippedTracksTracking() {
 function testSummaryShowsSkippedTracks() {
     console.log('Test: Summary includes skipped tracks and re-run guidance');
 
-    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    // Summary display is now in lib/rip.js module
+    const ripContent = fs.readFileSync(path.join(__dirname, '../lib/rip.js'), 'utf-8');
 
     // Check that summary mentions extras
     assert(
-        juiceItContent.includes('Tracks Not Ripped'),
+        ripContent.includes('Tracks Not Ripped'),
         'Summary should mention tracks not ripped'
     );
 
     // Check that re-run guidance is shown (raw mode alternative)
     assert(
-        juiceItContent.includes('juiceit --raw'),
+        ripContent.includes('juiceit --raw'),
         'Summary should show --raw as alternative'
     );
 
@@ -305,30 +312,31 @@ function testSummaryShowsSkippedTracks() {
 function testPositionalArgumentSupport() {
     console.log('Test: Positional argument support is implemented');
 
-    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    const cliContent = fs.readFileSync(path.join(__dirname, '../lib/cli.js'), 'utf-8');
+    const ripContent = fs.readFileSync(path.join(__dirname, '../lib/rip.js'), 'utf-8');
 
-    // Check that positional arguments are collected
+    // Check that positional arguments are collected (now in cli module)
     assert(
-        juiceItContent.includes('positionalArgs'),
-        'juiceit.js should collect positional arguments'
+        cliContent.includes('positionalArgs'),
+        'cli module should collect positional arguments'
     );
 
-    // Check that searchQuery is set from positional args
+    // Check that searchQuery is set from positional args (now in cli module)
     assert(
-        juiceItContent.includes('options.searchQuery'),
-        'juiceit.js should set options.searchQuery'
+        cliContent.includes('options.searchQuery'),
+        'cli module should set options.searchQuery'
     );
 
-    // Check that guidedMetadataSelection function exists
+    // Check that guidedMetadataSelection function is called (now in rip module)
     assert(
-        juiceItContent.includes('guidedMetadataSelection'),
-        'juiceit.js should have guidedMetadataSelection function'
+        ripContent.includes('guidedMetadataSelection'),
+        'rip module should call guidedMetadataSelection function'
     );
 
-    // Check that naked invocation routes to guided selection
+    // Check that naked invocation routes to guided selection (now in rip module)
     assert(
-        juiceItContent.includes('!hasUserQuery && !isInteractive'),
-        'juiceit.js should detect naked invocations'
+        ripContent.includes('!hasUserQuery && !isInteractive'),
+        'rip module should detect naked invocations'
     );
 
     console.log('  ✓ PASS\n');
