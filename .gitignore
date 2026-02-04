@@ -36,7 +36,9 @@ package-lock.json
 # Build artifacts
 dist/
 build/
+releases/
 *.tar.gz
+*.tgz
 .homebrew-staging/
 .homebrew-dev.tar.gz
 .homebrew-release.tar.gz

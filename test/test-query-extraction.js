@@ -159,7 +159,13 @@ async function main() {
         process.exit(1);
     }
 
-    const tmdbApiKey = config.tmdbApiKey || 'REMOVED_API_KEY';
+    if (!config.tmdbApiKey) {
+        console.error('\n❌ Error: TMDB API key not configured.');
+        console.error('   Run: juice-it --setup\n');
+        process.exit(1);
+    }
+
+    const tmdbApiKey = config.tmdbApiKey;
 
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  🧪 AI Query Extraction Test');
