@@ -241,7 +241,7 @@ if (config.isFirstRun() && !options.runSetup && !options.showHelp && !options.sh
         console.log('  What you can try:');
         console.log('    1. Make sure a DVD is inserted and the disc has finished loading');
         console.log('    2. Wait a few seconds and try again');
-        console.log('    3. Manually specify the DVD path: juiceit --dvdSource /dev/diskN');
+        console.log('    3. Manually specify the DVD path: juice-it --dvdSource /dev/diskN');
         console.log('');
         console.log('  To find your DVD device, run: diskutil list');
         console.log('');

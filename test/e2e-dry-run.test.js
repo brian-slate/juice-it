@@ -298,7 +298,7 @@ function testSummaryShowsSkippedTracks() {
 
     // Check that re-run guidance is shown (raw mode alternative)
     assert(
-        ripContent.includes('juiceit --raw'),
+        ripContent.includes('juice-it --raw'),
         'Summary should show --raw as alternative'
     );
 
