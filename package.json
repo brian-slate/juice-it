@@ -1,6 +1,6 @@
 {
   "name": "juice-it",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "Smart DVD ripper with automatic metadata lookup and episode naming",
   "main": "juiceit.js",
   "bin": {
