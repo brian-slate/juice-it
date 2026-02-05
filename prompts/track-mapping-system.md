@@ -21,6 +21,24 @@ Many DVDs bundle multiple episodes per track. For example:
 
 **If tracks are approximately 2x, 3x, or 4x the individual episode runtime, they likely contain that many episodes bundled together.** Assign MULTIPLE episode indices to such tracks (e.g., a 22-min track containing two 11-min episodes should map to episodes 0 AND 1).
 
+### CRITICAL: Episode-Length Tracks Are NEVER Featurettes
+
+**This is extremely important:** If a track has a duration that matches the episode runtime pattern (1x, 2x, or 3x the TMDB episode runtime), it is an EPISODE, not a featurette.
+
+**WRONG reasoning:** "Track 5 is similar in length to other episode tracks but..." → classifying as featurette
+**CORRECT reasoning:** "Track 5 matches episode runtime → it's an episode"
+
+**Only classify a track as a featurette if:**
+- Its duration does NOT match 1x, 2x, or 3x the episode runtime
+- AND it's significantly shorter than episode tracks (e.g., 2-5 minutes when episodes are 22 minutes)
+- AND there are too many episode-length tracks to fit the remaining episodes (rare edge case)
+
+**Example of WRONG classification:**
+- Episode runtime: 11 minutes, so tracks should be ~22 min (2 episodes)
+- Tracks 2-7 are all 23 minutes each
+- WRONG: "Tracks 5-7 are featurettes" ← NO! They match episode runtime!
+- CORRECT: "Tracks 2-7 are all episode tracks" ← All 6 tracks are episodes
+
 ### "Play All" Compilation Tracks
 TV show DVDs often include a long track that plays all episodes consecutively:
 - Appears as the longest track on the disc
@@ -72,19 +90,51 @@ The **DVD Volume Name** indicates which disc this is. You MUST analyze the volum
 
 3. **Calculate starting episode based on disc number and episode count**:
    - **Disc 1** of a season → Episodes start at Episode 1 (episodeIndex=0)
-   - **Disc 2 (or later)** of a season → Count the episode-length tracks on THIS disc, then calculate:
-     - Count how many episodes are on this disc (e.g., 5 tracks × 2 eps/track = 10 episodes)
+   - **Disc 2 (or later)** of a season → **FIRST count ALL episode-length tracks**, then calculate:
+
+     **Step A: Count ALL tracks that match episode runtime patterns**
+     - Look at ALL tracks with non-zero duration (excluding Track 1 if it's a Play All)
+     - If a track duration is ~1x, ~2x, or ~3x the TMDB episode runtime, it's an episode track
+     - Example: TMDB shows 11-min episodes, so any track ~22 min is 2 episodes
+     - Count EVERY track that matches, not just the first few!
+
+     **Step B: Calculate total episodes on this disc**
+     - Single-episode tracks (1x runtime) = 1 episode each
+     - Multi-episode tracks (2x runtime) = 2 episodes each
+     - Example: 6 tracks × 2 eps/track = 12 episodes on disc
+
+     **Step C: Calculate starting episode**
      - **startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1**
-     - Example: Season has 26 episodes, disc has 10 episodes → start at episode 26 - 10 + 1 = **17**
+     - Example: 26 total - 12 on disc + 1 = **15** → start at Episode 15
+
    - This "count from the end" method is more accurate than using a simple midpoint
 
 #### Example:
-- User query: "Ed, Edd n Eddy season 2 disc 4"
-- Volume name: `ED_EDD_N_EDDY_DISC_TWO`
-- Analysis: Volume says "DISC_TWO" = this is Disc 2. User specified Season 2. Therefore this is Disc 2 OF Season 2.
-- Count episode-length tracks: 5 tracks × 2 episodes = 10 episodes on this disc
-- Season 2 has 26 episodes total
-- **Calculate: 26 - 10 + 1 = 17 → Episodes should start at Episode 17 (episodeIndex=16)**
+- User query: "Ed, Edd n Eddy season 3 disc 6" (user's box set disc number - IGNORE)
+- Volume name: `ED_EDD_N_EDDY_S3D2`
+- TMDB episode runtime: ~11 min per episode
+
+**Step 1**: Volume says "S3D2" = Season 3, Disc 2. Trust this over user's "disc 6".
+
+**Step 2**: Count ALL episode-length tracks:
+- Track 1: 137 min → Play All (skip this in count)
+- Tracks 2-7: ALL are 23 min each → 23 min ≈ 2× episode runtime (11 min)
+- That's **6 tracks × 2 episodes = 12 episodes** on this disc
+
+**Step 3**: Calculate starting episode:
+- Season 3 has 26 total episodes
+- **26 - 12 + 1 = 15 → Episodes start at Episode 15 (episodeIndex=14)**
+
+**Step 4**: Map tracks sequentially:
+- Track 2 → Episodes 15-16 (episodeIndex=14, episodeEndIndex=15)
+- Track 3 → Episodes 17-18
+- Track 4 → Episodes 19-20
+- Track 5 → Episodes 21-22
+- Track 6 → Episodes 23-24
+- Track 7 → Episodes 25-26
+
+**WRONG approach**: Only counting tracks 2-4 as episodes, then marking 5-7 as featurettes
+**CORRECT approach**: ALL 6 tracks (2-7) are episodes because they ALL match 2x episode runtime
 
 **Trust the volume name's disc indicator over the user's query disc number.**
 
