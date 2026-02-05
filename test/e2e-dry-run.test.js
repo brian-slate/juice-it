@@ -327,16 +327,22 @@ function testPositionalArgumentSupport() {
         'cli module should set options.searchQuery'
     );
 
-    // Check that guidedMetadataSelection function is called (now in rip module)
+    // Check that naked invocations use generic track naming (not forced interactive)
     assert(
-        ripContent.includes('guidedMetadataSelection'),
-        'rip module should call guidedMetadataSelection function'
+        ripContent.includes('Using Generic Track Names'),
+        'rip module should use generic track names for naked invocations without API keys'
     );
 
-    // Check that naked invocation routes to guided selection (now in rip module)
+    // Check that naked invocation detection exists (now in rip module)
     assert(
         ripContent.includes('!hasUserQuery && !isInteractive'),
         'rip module should detect naked invocations'
+    );
+
+    // Check that full smart mode requires both keys
+    assert(
+        ripContent.includes('hasFullSmartMode'),
+        'rip module should check for full smart mode (both API keys)'
     );
 
     console.log('  ✓ PASS\n');
