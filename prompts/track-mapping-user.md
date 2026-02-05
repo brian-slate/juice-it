@@ -66,7 +66,7 @@ Analyze the raw data above and determine which DVD tracks correspond to which ep
 5. **Classify bonus content (but DON'T skip it)** - Featurettes, behind-the-scenes, interviews, deleted scenes, etc. should be RIPPED with proper `extraType` classification for Plex naming
 6. **Consider the full picture** - A track's chapters, audio streams, and position may provide context
 7. **Assign episodes sequentially from the calculated starting point** - Once you determine the starting episode, assign in order from there
-8. **Disc may be part of a set** - If volume name shows "DISC_TWO" or similar, this is NOT Disc 1 - calculate the starting episode using the "count from end" method
+8. **Disc may be part of a set** - If volume name shows "DISC_TWO" or similar, this is NOT Disc 1 - count the episodes on THIS disc and calculate: startEpisode = totalEpisodes - episodesOnThisDisc + 1
 
 ### What to Include in Your Response
 

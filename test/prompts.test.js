@@ -821,11 +821,10 @@ function testMultiDiscContextIncluded() {
     assert.strictEqual(prompts.user.includes('Multi-Disc Context'), true, 'Should include Multi-Disc Context section');
     assert.strictEqual(prompts.user.includes('User query mentioned Disc 2'), true, 'Should mention the user query disc number');
     // Should tell AI to look at volume name and analyze patterns
-    assert.strictEqual(prompts.user.includes('Look at the volume name'), true, 'Should instruct AI to look at volume name');
-    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name pattern guidance');
-    // Should explain MIDPOINT method for Disc 2 (not "count from end" which only works for 2-disc sets)
-    assert.strictEqual(prompts.user.includes('MIDPOINT'), true, 'Should explain MIDPOINT method');
-    assert.strictEqual(prompts.user.includes('Do NOT use "count from end"'), true, 'Should warn against count from end method');
+    assert.strictEqual(prompts.user.includes('Identify the disc number from volume name'), true, 'Should instruct AI to identify disc number');
+    // Should explain Episode Count method for Disc 2+ (count episodes on this disc, then calculate starting episode)
+    assert.strictEqual(prompts.user.includes('count episodes on THIS disc'), true, 'Should explain episode count method');
+    assert.strictEqual(prompts.user.includes('startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1'), true, 'Should show starting episode formula');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1023,11 +1022,11 @@ function testMultiDiscContextForDisc3Plus() {
         discNumber: 3  // Disc 3
     });
 
-    // Should include multi-disc context that tells AI to check volume name
+    // Should include multi-disc context that tells AI to analyze disc number
     assert.strictEqual(prompts.user.includes('User query mentioned Disc 3'), true, 'Should mention the user query disc number');
-    assert.strictEqual(prompts.user.includes('Look at the volume name'), true, 'Should instruct AI to look at volume name');
-    // Should explain what to do for later discs
-    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name pattern guidance');
+    assert.strictEqual(prompts.user.includes('Identify the disc number from volume name'), true, 'Should instruct AI to identify disc number');
+    // Should explain the episode count method for calculating starting episode
+    assert.strictEqual(prompts.user.includes('count episodes on THIS disc'), true, 'Should explain episode count method');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1471,10 +1470,9 @@ function testTrackCountBasedInference() {
 
     // Should tell AI to analyze volume name (not auto-infer)
     assert.strictEqual(prompts.user.includes('REQUIRES YOUR ANALYSIS'), true, 'Should ask AI to analyze');
-    // Should include volume name pattern guidance
-    assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name patterns');
-    // Should explain MIDPOINT method (not "count from end")
-    assert.strictEqual(prompts.user.includes('MIDPOINT'), true, 'Should explain MIDPOINT method');
+    // Should explain Episode Count method for calculating starting episode
+    assert.strictEqual(prompts.user.includes('count episodes on THIS disc'), true, 'Should explain episode count method');
+    assert.strictEqual(prompts.user.includes('totalSeasonEpisodes - episodesOnThisDisc'), true, 'Should show starting episode calculation');
 
     teardown();
     console.log('  ✓ PASS\n');

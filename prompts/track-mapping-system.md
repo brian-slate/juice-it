@@ -88,61 +88,59 @@ The **DVD Volume Name** indicates which disc this is. You MUST analyze the volum
    - If user says "Season 2" and volume name says "DISC_TWO", this is **Disc 2 of Season 2**
    - The user's "disc number" in their query often refers to box set position and should be IGNORED
 
-3. **Calculate starting episode based on disc number and episode count**:
+3. **Calculate starting episode for Disc 2+** using the **Episode Count Method**:
    - **Disc 1** of a season → Episodes start at Episode 1 (episodeIndex=0)
-   - **Disc 2** of a season → **Use the MIDPOINT method** (NOT "count from end"):
+   - **Disc 2+** of a season → Count episodes on THIS disc, then calculate:
 
      **Step A: Count ALL tracks that match episode runtime patterns**
      - Look at ALL tracks with non-zero duration (excluding Track 1 if it's a Play All)
      - If a track duration is ~1x, ~2x, or ~3x the TMDB episode runtime, it's an episode track
-     - Example: TMDB shows 11-min episodes, so any track ~22 min is 2 episodes
      - Count EVERY track that matches, not just the first few!
 
-     **Step B: Calculate total episodes on this disc**
-     - Single-episode tracks (1x runtime) = 1 episode each
-     - Multi-episode tracks (2x runtime) = 2 episodes each
-     - Example: 5 tracks × 2 eps/track = 10 episodes on disc
+     **Step B: Calculate total episodes on this disc (CHECK TMDB RUNTIMES!)**
+     - For each episode-length track, check if it contains 1 or 2 episodes:
+       - Track ~22 min with 11-min episodes → usually 2 episodes
+       - **BUT** if TMDB shows an episode is 22+ min (double-length), that track = 1 episode!
+     - Look at the TMDB episode table for double-length episodes (often finales/specials)
+     - Example: 5 tracks × 2 eps + 1 track with 22-min finale = 11 episodes
 
-     **Step C: Calculate starting episode using MIDPOINT (disc 2 may not be the last disc!)**
-     - **startEpisode = floor(totalSeasonEpisodes / 2) + 1** (approximately midpoint)
-     - Example: 26 total episodes → floor(26/2) + 1 = **14** → start at Episode 14
-     - This works whether the season has 2 discs OR 3+ discs
+     **Step C: Calculate starting episode from total**
+     - **startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1**
+     - Example: 25 total episodes, 11 on this disc → 25 - 11 + 1 = **15**
 
-   - **Disc 3** of a season → Start at approximately 2/3 through:
-     - **startEpisode = floor(totalSeasonEpisodes * 2 / 3) + 1**
-     - Example: 26 total → floor(26 * 2/3) + 1 = **18** → start at Episode 18
-
-   - **WARNING**: Do NOT use "count from end" - it only works if disc 2 is the LAST disc, which is often false!
-
-#### Example (Disc 2 with MIDPOINT method):
+#### Example (Disc 2 with Episode Count Method):
 - User query: "Ed, Edd n Eddy season 4 disc 7" (user's box set disc number - IGNORE)
 - Volume name: `ED_EDD_N_EDDY_S4D2`
-- TMDB episode runtime: ~11 min per episode
+- TMDB shows: 24 episodes at 11 min + 1 episode at 22 min (finale) = 25 total
 
 **Step 1**: Volume says "S4D2" = Season 4, Disc 2. Trust this over user's "disc 7".
 
 **Step 2**: Count ALL episode-length tracks:
 - Track 1: 137 min → Play All (skip this in count)
-- Tracks 2, 4, 5, 6, 7: ALL are 23 min each → 23 min ≈ 2× episode runtime (11 min)
-- Track 3: 0 min → unrippable (skip in count)
-- That's **5 tracks × 2 episodes = 10 episodes** on this disc
+- Tracks 2-7: ALL are ~23 min each
 
-**Step 3**: Calculate starting episode using MIDPOINT (we don't know if this is disc 2 of 2 or disc 2 of 3!):
-- Season 4 has 26 total episodes
-- **floor(26/2) + 1 = 14 → Episodes start at Episode 14 (episodeIndex=13)**
+**Step 3**: Calculate episodes per track using TMDB runtimes:
+- TMDB Episode 25 is 22 min (double-length finale)
+- Tracks 2-6: 5 tracks × 2 episodes = 10 episodes
+- Track 7: matches the 22-min finale = 1 episode
+- **Total: 11 episodes on this disc**
 
-**Step 4**: Map tracks sequentially starting from episode 14:
-- Track 2 → Episodes 14-15 (episodeIndex=13, episodeEndIndex=14)
-- Track 4 → Episodes 16-17
-- Track 5 → Episodes 18-19
-- Track 6 → Episodes 20-21
-- Track 7 → Episodes 22-23
+**Step 4**: Calculate starting episode:
+- Season 4 has 25 total episodes
+- **25 - 11 + 1 = 15 → Episodes start at Episode 15 (episodeIndex=14)**
 
-**WRONG approach (old "count from end")**: 26 - 10 + 1 = 17 → starts too late, misses episodes!
-**CORRECT approach (midpoint)**: floor(26/2) + 1 = 14 → starts at the right place for disc 2
+**Step 5**: Map tracks sequentially starting from episode 15:
+- Track 2 → Episodes 15-16 (Thick as an Ed / Sorry, Wrong Ed)
+- Track 3 → Episodes 17-18
+- Track 4 → Episodes 19-20
+- Track 5 → Episodes 21-22
+- Track 6 → Episodes 23-24
+- Track 7 → Episode 25 (Take This Ed and Shove It - double length)
+
+**KEY INSIGHT**: The episode count method is more accurate than midpoint because DVD splits aren't always even. A 25-episode season might split 14/11 rather than 12/13.
 
 **WRONG approach**: Only counting some tracks as episodes, marking others as featurettes
-**CORRECT approach**: ALL tracks matching 2x episode runtime are episodes
+**CORRECT approach**: ALL tracks matching 1x or 2x episode runtime are episodes
 
 **Trust the volume name's disc indicator over the user's query disc number.**
 
