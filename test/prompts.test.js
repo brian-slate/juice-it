@@ -823,9 +823,9 @@ function testMultiDiscContextIncluded() {
     // Should tell AI to look at volume name and analyze patterns
     assert.strictEqual(prompts.user.includes('Look at the volume name'), true, 'Should instruct AI to look at volume name');
     assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name pattern guidance');
-    // Should explain "count from end" method for Disc 2
-    assert.strictEqual(prompts.user.includes('count from the END'), true, 'Should explain count from end method');
-    assert.strictEqual(prompts.user.includes('DO NOT use a simple midpoint'), true, 'Should warn against simple midpoint');
+    // Should explain MIDPOINT method for Disc 2 (not "count from end" which only works for 2-disc sets)
+    assert.strictEqual(prompts.user.includes('MIDPOINT'), true, 'Should explain MIDPOINT method');
+    assert.strictEqual(prompts.user.includes('Do NOT use "count from end"'), true, 'Should warn against count from end method');
 
     teardown();
     console.log('  ✓ PASS\n');
@@ -1473,8 +1473,8 @@ function testTrackCountBasedInference() {
     assert.strictEqual(prompts.user.includes('REQUIRES YOUR ANALYSIS'), true, 'Should ask AI to analyze');
     // Should include volume name pattern guidance
     assert.strictEqual(prompts.user.includes('Volume Name Patterns'), true, 'Should include volume name patterns');
-    // Should explain count from end method
-    assert.strictEqual(prompts.user.includes('count from the END'), true, 'Should explain count from end method');
+    // Should explain MIDPOINT method (not "count from end")
+    assert.strictEqual(prompts.user.includes('MIDPOINT'), true, 'Should explain MIDPOINT method');
 
     teardown();
     console.log('  ✓ PASS\n');

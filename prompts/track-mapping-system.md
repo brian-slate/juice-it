@@ -90,7 +90,7 @@ The **DVD Volume Name** indicates which disc this is. You MUST analyze the volum
 
 3. **Calculate starting episode based on disc number and episode count**:
    - **Disc 1** of a season → Episodes start at Episode 1 (episodeIndex=0)
-   - **Disc 2 (or later)** of a season → **FIRST count ALL episode-length tracks**, then calculate:
+   - **Disc 2** of a season → **Use the MIDPOINT method** (NOT "count from end"):
 
      **Step A: Count ALL tracks that match episode runtime patterns**
      - Look at ALL tracks with non-zero duration (excluding Track 1 if it's a Play All)
@@ -101,40 +101,48 @@ The **DVD Volume Name** indicates which disc this is. You MUST analyze the volum
      **Step B: Calculate total episodes on this disc**
      - Single-episode tracks (1x runtime) = 1 episode each
      - Multi-episode tracks (2x runtime) = 2 episodes each
-     - Example: 6 tracks × 2 eps/track = 12 episodes on disc
+     - Example: 5 tracks × 2 eps/track = 10 episodes on disc
 
-     **Step C: Calculate starting episode**
-     - **startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1**
-     - Example: 26 total - 12 on disc + 1 = **15** → start at Episode 15
+     **Step C: Calculate starting episode using MIDPOINT (disc 2 may not be the last disc!)**
+     - **startEpisode = floor(totalSeasonEpisodes / 2) + 1** (approximately midpoint)
+     - Example: 26 total episodes → floor(26/2) + 1 = **14** → start at Episode 14
+     - This works whether the season has 2 discs OR 3+ discs
 
-   - This "count from the end" method is more accurate than using a simple midpoint
+   - **Disc 3** of a season → Start at approximately 2/3 through:
+     - **startEpisode = floor(totalSeasonEpisodes * 2 / 3) + 1**
+     - Example: 26 total → floor(26 * 2/3) + 1 = **18** → start at Episode 18
 
-#### Example:
-- User query: "Ed, Edd n Eddy season 3 disc 6" (user's box set disc number - IGNORE)
-- Volume name: `ED_EDD_N_EDDY_S3D2`
+   - **WARNING**: Do NOT use "count from end" - it only works if disc 2 is the LAST disc, which is often false!
+
+#### Example (Disc 2 with MIDPOINT method):
+- User query: "Ed, Edd n Eddy season 4 disc 7" (user's box set disc number - IGNORE)
+- Volume name: `ED_EDD_N_EDDY_S4D2`
 - TMDB episode runtime: ~11 min per episode
 
-**Step 1**: Volume says "S3D2" = Season 3, Disc 2. Trust this over user's "disc 6".
+**Step 1**: Volume says "S4D2" = Season 4, Disc 2. Trust this over user's "disc 7".
 
 **Step 2**: Count ALL episode-length tracks:
 - Track 1: 137 min → Play All (skip this in count)
-- Tracks 2-7: ALL are 23 min each → 23 min ≈ 2× episode runtime (11 min)
-- That's **6 tracks × 2 episodes = 12 episodes** on this disc
+- Tracks 2, 4, 5, 6, 7: ALL are 23 min each → 23 min ≈ 2× episode runtime (11 min)
+- Track 3: 0 min → unrippable (skip in count)
+- That's **5 tracks × 2 episodes = 10 episodes** on this disc
 
-**Step 3**: Calculate starting episode:
-- Season 3 has 26 total episodes
-- **26 - 12 + 1 = 15 → Episodes start at Episode 15 (episodeIndex=14)**
+**Step 3**: Calculate starting episode using MIDPOINT (we don't know if this is disc 2 of 2 or disc 2 of 3!):
+- Season 4 has 26 total episodes
+- **floor(26/2) + 1 = 14 → Episodes start at Episode 14 (episodeIndex=13)**
 
-**Step 4**: Map tracks sequentially:
-- Track 2 → Episodes 15-16 (episodeIndex=14, episodeEndIndex=15)
-- Track 3 → Episodes 17-18
-- Track 4 → Episodes 19-20
-- Track 5 → Episodes 21-22
-- Track 6 → Episodes 23-24
-- Track 7 → Episodes 25-26
+**Step 4**: Map tracks sequentially starting from episode 14:
+- Track 2 → Episodes 14-15 (episodeIndex=13, episodeEndIndex=14)
+- Track 4 → Episodes 16-17
+- Track 5 → Episodes 18-19
+- Track 6 → Episodes 20-21
+- Track 7 → Episodes 22-23
 
-**WRONG approach**: Only counting tracks 2-4 as episodes, then marking 5-7 as featurettes
-**CORRECT approach**: ALL 6 tracks (2-7) are episodes because they ALL match 2x episode runtime
+**WRONG approach (old "count from end")**: 26 - 10 + 1 = 17 → starts too late, misses episodes!
+**CORRECT approach (midpoint)**: floor(26/2) + 1 = 14 → starts at the right place for disc 2
+
+**WRONG approach**: Only counting some tracks as episodes, marking others as featurettes
+**CORRECT approach**: ALL tracks matching 2x episode runtime are episodes
 
 **Trust the volume name's disc indicator over the user's query disc number.**
 

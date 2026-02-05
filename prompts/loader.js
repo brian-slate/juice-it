@@ -343,23 +343,10 @@ First episode track should use episodeIndex=${startEpisodeOverride - 1}.
 Season ${metadata.season} has ${totalEpisodes} total episodes.
 `;
     } else if (discNumber && discNumber > 1 && totalEpisodes > 0) {
-        // Auto-infer using track-count-based logic (not assuming 2-disc sets)
-        // Note: These estimates are calculated for documentation but AI infers from disc patterns
-        let _startEstimate, _endEstimate;
-
-        if (estimatedEpisodeCount > 0) {
-            // Infer: later disc = later episodes
-            // For disc N, estimate the "last X" episodes where X = episode count on disc
-            _endEstimate = totalEpisodes;
-            _startEstimate = Math.max(1, totalEpisodes - estimatedEpisodeCount + 1);
-        } else {
-            // Fallback: divide episodes evenly (but don't assume 2 discs)
-            // Use disc number as a rough guide
-            const estimatedDiscsInSeason = Math.max(discNumber, 2);
-            const avgEpisodesPerDisc = Math.ceil(totalEpisodes / estimatedDiscsInSeason);
-            _startEstimate = (discNumber - 1) * avgEpisodesPerDisc + 1;
-            _endEstimate = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
-        }
+        // Auto-infer using MIDPOINT method (don't assume disc 2 is the last disc!)
+        // Calculate midpoint-based starting episode
+        const midpointStart = Math.floor(totalEpisodes / 2) + 1;
+        const disc3Start = Math.floor(totalEpisodes * 2 / 3) + 1;
 
         discContext = `### 1E. Multi-Disc Context (REQUIRES YOUR ANALYSIS)
 
@@ -368,26 +355,26 @@ Season ${metadata.season} has ${totalEpisodes} total episodes.
 ⚠️ **CRITICAL ANALYSIS REQUIRED**:
 1. **Look at the volume name** and find the disc indicator (DISC_ONE, DISC_TWO, D1, D2, S#D#, etc.)
 2. **That disc number applies to Season ${metadata.season}** (the user's specified season)
-3. **Calculate starting episode using the "count from end" method** (explained below)
+3. **Calculate starting episode using the MIDPOINT method** (NOT "count from end"!)
 
 **Volume Name Patterns**:
 - \`DISC_ONE\`, \`DISC_1\`, \`D1\`, \`S${metadata.season}D1\` → Disc 1 of Season ${metadata.season} → start at Episode 1
-- \`DISC_TWO\`, \`DISC_2\`, \`D2\`, \`S${metadata.season}D2\` → Disc 2 (likely LAST disc) of Season ${metadata.season}
+- \`DISC_TWO\`, \`DISC_2\`, \`D2\`, \`S${metadata.season}D2\` → Disc 2 of Season ${metadata.season} → use MIDPOINT
+- \`DISC_THREE\`, \`DISC_3\`, \`D3\`, \`S${metadata.season}D3\` → Disc 3 of Season ${metadata.season} → use 2/3 point
 
 **Season ${metadata.season} has ${totalEpisodes} episodes total.**
 
 **If volume name indicates Disc 1:**
 - Episodes start from Episode 1 (episodeIndex=0)
 
-**If volume name indicates Disc 2 (or the last disc of the season):**
-1. First, count how many episode-length tracks are on THIS disc (look at the track table above)
-2. Calculate total episodes on this disc (e.g., 5 tracks × 2 episodes per track = 10 episodes)
-3. **Calculate: startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1**
-4. Example: If season has 26 episodes and disc has 10 episodes → 26 - 10 + 1 = 17 → start at Episode 17
-5. DO NOT use a simple midpoint - count from the END of the season!
+**If volume name indicates Disc 2:**
+- **Use MIDPOINT: floor(totalEpisodes / 2) + 1 = ${midpointStart}**
+- Start at Episode ${midpointStart} (episodeIndex=${midpointStart - 1})
+- ⚠️ Do NOT use "count from end" - disc 2 may NOT be the last disc!
 
-**If volume name indicates Disc 3+:**
-- Use similar "count from end" logic for multi-disc splits
+**If volume name indicates Disc 3:**
+- **Use 2/3 point: floor(totalEpisodes * 2 / 3) + 1 = ${disc3Start}**
+- Start at Episode ${disc3Start} (episodeIndex=${disc3Start - 1})
 `;
     } else if (discNumber === 1) {
         discContext = `### 1E. Multi-Disc Context
