@@ -15,6 +15,12 @@ Map DVD tracks to episodes using the information below.
 
 {{episodeTable}}
 
+### 1A-2. Show Overview (All Seasons)
+
+{{showOverview}}
+
+Use this to understand if this season spans multiple discs. If a season has 26 episodes but this disc only has ~13 episode-length tracks, this is likely a multi-disc season.
+
 ### 1B. DVD Track Data (from disc scan)
 
 {{trackTable}}

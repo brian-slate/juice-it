@@ -169,6 +169,7 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
 function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], volumeName = null, discNumber = null, startEpisodeOverride = null }) {
     const episodes = metadata.episodes || [];
     const totalEpisodes = episodes.length;
+    const showOverview = metadata.showOverview || null;
 
     // Build episode table (raw data, no analysis)
     const episodeTable = episodes.map((ep, _i) =>
@@ -200,11 +201,39 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
     // Build lsdvd info section
     let lsdvdInfo = 'Extended disc metadata not available (lsdvd not installed or failed).';
     if (lsdvdMetadata) {
+        let discPatternInfo = '';
+        if (lsdvdMetadata.discPatterns && lsdvdMetadata.discPatterns.patterns.length > 0) {
+            const patternList = lsdvdMetadata.discPatterns.patterns
+                .map(p => `- Pattern "${p.raw}": ${JSON.stringify(p.values)}`)
+                .join('\n');
+            discPatternInfo = `
+
+**Detected Disc Position Patterns** (use these to determine starting episode):
+${patternList}
+
+Season indicators: ${lsdvdMetadata.discPatterns.seasonIndicators.length > 0 ? lsdvdMetadata.discPatterns.seasonIndicators.map(s => s.value).join(', ') : 'none found'}
+Disc indicators: ${lsdvdMetadata.discPatterns.discIndicators.length > 0 ? lsdvdMetadata.discPatterns.discIndicators.map(d => d.value).join(', ') : 'none found'}`;
+        }
+
         lsdvdInfo = `**Disc Title**: ${lsdvdMetadata.discTitle || 'unknown'}
 **Disc ID**: ${lsdvdMetadata.discId || 'unknown'}
-**Longest Track**: ${lsdvdMetadata.longestTrack || '?'}
+**Longest Track**: ${lsdvdMetadata.longestTrack || '?'}${discPatternInfo}
 
 *Note: "Chapters" indicates internal chapter markers. "Audio" is number of audio streams. "Subs" is subtitle tracks.*`;
+    }
+
+    // Build show overview section for multi-disc context
+    let showOverviewText = 'Show overview not available.';
+    if (showOverview) {
+        const seasonLines = showOverview.seasons
+            .filter(s => s.seasonNumber > 0) // Exclude specials (season 0)
+            .map(s => `  Season ${s.seasonNumber}: ${s.episodeCount} episodes`)
+            .join('\n');
+        showOverviewText = `**Total Seasons**: ${showOverview.numberOfSeasons}
+**Total Episodes**: ${showOverview.numberOfEpisodes}
+
+**Episodes per Season**:
+${seasonLines}`;
     }
 
     // Build runtime summary (soft guidance, not directives)
@@ -315,20 +344,21 @@ Season ${metadata.season} has ${totalEpisodes} total episodes.
 `;
     } else if (discNumber && discNumber > 1 && totalEpisodes > 0) {
         // Auto-infer using track-count-based logic (not assuming 2-disc sets)
-        let startEstimate, endEstimate;
+        // Note: These estimates are calculated for documentation but AI infers from disc patterns
+        let _startEstimate, _endEstimate;
 
         if (estimatedEpisodeCount > 0) {
             // Infer: later disc = later episodes
             // For disc N, estimate the "last X" episodes where X = episode count on disc
-            endEstimate = totalEpisodes;
-            startEstimate = Math.max(1, totalEpisodes - estimatedEpisodeCount + 1);
+            _endEstimate = totalEpisodes;
+            _startEstimate = Math.max(1, totalEpisodes - estimatedEpisodeCount + 1);
         } else {
             // Fallback: divide episodes evenly (but don't assume 2 discs)
             // Use disc number as a rough guide
             const estimatedDiscsInSeason = Math.max(discNumber, 2);
             const avgEpisodesPerDisc = Math.ceil(totalEpisodes / estimatedDiscsInSeason);
-            startEstimate = (discNumber - 1) * avgEpisodesPerDisc + 1;
-            endEstimate = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
+            _startEstimate = (discNumber - 1) * avgEpisodesPerDisc + 1;
+            _endEstimate = Math.min(discNumber * avgEpisodesPerDisc, totalEpisodes);
         }
 
         discContext = `### 1E. Multi-Disc Context (REQUIRES YOUR ANALYSIS)
@@ -378,7 +408,8 @@ Season ${metadata.season} has ${totalEpisodes} total episodes.
         unrippableInfo,
         discContext,
         runtimeSummary,
-        computationalHints
+        computationalHints,
+        showOverview: showOverviewText
     });
 
     return { system, user };
