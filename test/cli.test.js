@@ -119,6 +119,10 @@ function testBooleanFlags() {
     options = parseArgs(['--no-eject']);
     assert.strictEqual(options.ejectOnComplete, false, '--no-eject should set ejectOnComplete to false');
 
+    // Test --start-episode
+    options = parseArgs(['--start-episode', '14']);
+    assert.strictEqual(options.startEpisode, 14, '--start-episode should set startEpisode to integer');
+
     console.log('  ✓ PASS\n');
 }
 
