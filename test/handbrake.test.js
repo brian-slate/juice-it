@@ -392,6 +392,79 @@ async function testScanSingleTitleHandlesError() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Test: ejectDisc returns true when drutil succeeds
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testEjectDiscSucceedsWithDrutil() {
+    console.log('Test: ejectDisc returns true when drutil succeeds');
+    resetHandbrake();
+
+    let methodsCalled = [];
+
+    handbrake.setDependencies({
+        spawnSync: (cmd, args) => {
+            methodsCalled.push({ cmd, args: args ? args[0] : null });
+            if (cmd === 'drutil') return { status: 0 };
+            return { status: 1 };
+        }
+    });
+
+    const result = handbrake.ejectDisc();
+
+    assert.ok(methodsCalled.some(m => m.cmd === 'drutil'), 'Should call drutil');
+    assert.strictEqual(result, true, 'Should return true on success');
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Test: ejectDisc falls back to diskutil if drutil fails
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testEjectDiscFallsToDiskutil() {
+    console.log('Test: ejectDisc falls back to diskutil when drutil fails');
+    resetHandbrake();
+
+    let methodsCalled = [];
+
+    handbrake.setDependencies({
+        spawnSync: (cmd, args) => {
+            methodsCalled.push({ cmd, args: args ? args[0] : null });
+            if (cmd === 'drutil') return { status: 1 }; // drutil fails
+            if (cmd === 'diskutil' && args[0] === 'eject') return { status: 0 }; // diskutil succeeds
+            return { status: 1 };
+        }
+    });
+
+    const result = handbrake.ejectDisc('/dev/disk5');
+
+    assert.ok(methodsCalled.some(m => m.cmd === 'drutil'), 'Should try drutil first');
+    assert.ok(methodsCalled.some(m => m.cmd === 'diskutil' && m.args === 'eject'), 'Should fall back to diskutil');
+    assert.strictEqual(result, true, 'Should return true on fallback success');
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Test: ejectDisc returns false when all methods fail
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testEjectDiscReturnsFalseOnFailure() {
+    console.log('Test: ejectDisc returns false when all methods fail');
+    resetHandbrake();
+
+    handbrake.setDependencies({
+        spawnSync: () => ({ status: 1 }) // All methods fail
+    });
+
+    const result = handbrake.ejectDisc('/dev/disk5');
+
+    assert.strictEqual(result, false, 'Should return false when all methods fail');
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Test: resetDvdDrive tries multiple eject methods
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -531,6 +604,11 @@ async function runTests() {
         await testScanSingleTitleParsesDuration();
         await testScanSingleTitleHandlesTimeout();
         await testScanSingleTitleHandlesError();
+
+        // ejectDisc tests
+        testEjectDiscSucceedsWithDrutil();
+        testEjectDiscFallsToDiskutil();
+        testEjectDiscReturnsFalseOnFailure();
 
         // resetDvdDrive tests
         await testResetDvdDriveTriesMultipleMethods();

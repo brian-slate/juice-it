@@ -41,6 +41,7 @@ function testEmptyArgs() {
     assert.strictEqual(options.outputDir, null);
     assert.strictEqual(options.dvdSource, null);
     assert.strictEqual(options.verbose, false);
+    assert.strictEqual(options.ejectOnComplete, true, 'ejectOnComplete should default to true');
     assert.strictEqual(options.showHelp, undefined);
     assert.strictEqual(options.searchQuery, undefined);
 
@@ -113,6 +114,10 @@ function testBooleanFlags() {
     // Test --dry-run
     options = parseArgs(['--dry-run']);
     assert.strictEqual(options.dryRun, true, '--dry-run should set dryRun');
+
+    // Test --no-eject
+    options = parseArgs(['--no-eject']);
+    assert.strictEqual(options.ejectOnComplete, false, '--no-eject should set ejectOnComplete to false');
 
     console.log('  ✓ PASS\n');
 }
