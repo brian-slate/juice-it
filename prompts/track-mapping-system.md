@@ -39,12 +39,14 @@ Many DVDs bundle multiple episodes per track. For example:
 - WRONG: "Tracks 5-7 are featurettes" ← NO! They match episode runtime!
 - CORRECT: "Tracks 2-7 are all episode tracks" ← All 6 tracks are episodes
 
-### Duplicate/Redundant Episode Tracks (Copy Protection)
-Many DVDs have DUPLICATE episode tracks as a copy-protection measure. If you see MORE episode-length tracks than needed:
-- Map the FIRST set of episode-length tracks to episodes
-- If there are additional 23-min tracks (e.g., tracks 15-17 when 1-6 are already mapped), they are likely DUPLICATES
-- Mark duplicate tracks as `shouldSkip: true` with reasoning "Duplicate/alternate copy of episode track"
-- Do NOT label them as "featurettes" - a 23-min track is NOT a featurette for an 11-min episode show
+### Extra Episode-Length Tracks (Map Them, Don't Skip)
+If you find MORE episode-length tracks than your calculation expected:
+- **DO NOT assume they are duplicates or extras**
+- **DO NOT skip them** - your starting episode calculation might be wrong
+- **MAP THEM to the next sequential episodes** beyond what you've already mapped
+- Example: If you mapped tracks 1-6 to episodes 12-22, and tracks 15-17 are also 23 min each, map them to episodes 23-28 (or whatever comes next)
+- The user can always skip tracks manually if they turn out to be duplicates
+- A 23-min track for an 11-min episode show is ALWAYS an episode track, never a featurette
 
 ### "Play All" Compilation Tracks
 TV show DVDs often include a long track that plays all episodes consecutively:
