@@ -156,3 +156,22 @@ console.log('  ✓ Operation completed');
 // Future: When UI lib is integrated
 // ui.success('Operation completed');
 ```
+
+---
+
+## Feature Complete Checklist
+
+Before committing a completed feature, run these checks:
+
+```bash
+# 1. Run ESLint to catch and fix issues
+npx eslint . --fix
+
+# 2. Run full test suite
+npm test
+
+# 3. Verify help text if you added/changed flags
+node juiceit.js --help
+```
+
+**Note:** ESLint and tests also run automatically on pre-commit via husky/lint-staged, but running them manually first catches issues earlier and avoids commit failures.
