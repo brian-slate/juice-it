@@ -164,9 +164,10 @@ function buildTmdbMatchPrompts({ volumeName, numTitles, trackDurations, movieRes
  * @param {string|null} params.volumeName - DVD volume name (may contain disc info like S3D1)
  * @param {number|null} params.discNumber - User-specified disc number (may be overall box set number)
  * @param {number|null} params.startEpisodeOverride - User-specified starting episode (1-based)
+ * @param {Array|null} params.enhancedTrackData - Enhanced track data from buildEnhancedTrackData()
  * @returns {{ system: string, user: string }} System and user prompts
  */
-function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], volumeName = null, discNumber = null, startEpisodeOverride = null }) {
+function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, lsdvdMetadata, unrippableTracks = [], volumeName = null, discNumber = null, startEpisodeOverride = null, enhancedTrackData = null }) {
     const episodes = metadata.episodes || [];
     const totalEpisodes = episodes.length;
     const showOverview = metadata.showOverview || null;
@@ -177,26 +178,56 @@ function buildTrackMappingPrompts({ metadata, trackDurations, runtimeAnalysis, l
     ).join('\n');
     const episodeTableFormatted = `| Ep# | Runtime | Title |\n|-----|---------|-------|\n${episodeTable}`;
 
-    // Build raw track table (no CANDIDATE/SKIP labels - just facts)
+    // Build raw track table - use enhanced data if available for richer chapter info
     const trackInfo = Object.entries(trackDurations)
         .map(([trackNum, duration]) => ({ trackNum: parseInt(trackNum), duration }))
         .sort((a, b) => a.trackNum - b.trackNum);
 
-    const trackTableRows = trackInfo.map(t => {
-        // Get lsdvd info if available
-        let lsdvdInfo = '';
-        if (lsdvdMetadata && lsdvdMetadata.tracks && lsdvdMetadata.tracks[t.trackNum]) {
-            const track = lsdvdMetadata.tracks[t.trackNum];
-            lsdvdInfo = ` | ${track.chapters} | ${track.audioStreams} | ${track.subpictures}`;
-        } else {
-            lsdvdInfo = ' | ? | ? | ?';
-        }
-        return `| ${t.trackNum} | ${t.duration} min${lsdvdInfo} |`;
-    }).join('\n');
+    // If we have enhanced track data (with chapter details), build a richer table
+    let trackTableFormatted;
+    if (enhancedTrackData && enhancedTrackData.length > 0) {
+        const trackTableRows = enhancedTrackData.map(t => {
+            // Build chapter info string for episode boundary detection
+            let chapterInfo = `${t.chapters}`;
+            if (t.chapterDetails && t.chapterDetails.length > 0 && t.chapters <= 10) {
+                // For tracks with ≤10 chapters, show chapter lengths (helps identify episode boundaries)
+                const chapterLengths = t.chapterDetails.map(ch => `${ch.lengthMinutes}m`).join(', ');
+                chapterInfo = `${t.chapters} (${chapterLengths})`;
+            } else if (t.chapterDetails && t.chapterDetails.length > 0) {
+                // For many chapters, just show count and total pattern
+                const avgChapterLen = (t.durationMinutes / t.chapters).toFixed(1);
+                chapterInfo = `${t.chapters} (~${avgChapterLen}m each)`;
+            }
 
-    const trackTableFormatted = lsdvdMetadata
-        ? `| Track | Duration | Chapters | Audio | Subs |\n|-------|----------|----------|-------|------|\n${trackTableRows}`
-        : `| Track | Duration |\n|-------|----------|\n${trackInfo.map(t => `| ${t.trackNum} | ${t.duration} min |`).join('\n')}`;
+            // Audio language summary
+            const audioLangs = t.audioLanguages.length > 0
+                ? t.audioLanguages.map(a => a.langCode).join('/')
+                : '?';
+
+            // Mark unrippable
+            const rippableMarker = t.isUnrippable ? ' ⊘' : '';
+
+            return `| ${t.track}${rippableMarker} | ${t.durationMinutes} min | ${chapterInfo} | ${audioLangs} |`;
+        }).join('\n');
+
+        trackTableFormatted = `| Track | Duration | Chapters | Audio |\n|-------|----------|----------|-------|\n${trackTableRows}`;
+    } else {
+        // Fallback to basic track table
+        const trackTableRows = trackInfo.map(t => {
+            let lsdvdInfo = '';
+            if (lsdvdMetadata && lsdvdMetadata.tracks && lsdvdMetadata.tracks[t.trackNum]) {
+                const track = lsdvdMetadata.tracks[t.trackNum];
+                lsdvdInfo = ` | ${track.chapters} | ${track.audioStreams} | ${track.subpictures}`;
+            } else {
+                lsdvdInfo = ' | ? | ? | ?';
+            }
+            return `| ${t.trackNum} | ${t.duration} min${lsdvdInfo} |`;
+        }).join('\n');
+
+        trackTableFormatted = lsdvdMetadata
+            ? `| Track | Duration | Chapters | Audio | Subs |\n|-------|----------|----------|-------|------|\n${trackTableRows}`
+            : `| Track | Duration |\n|-------|----------|\n${trackInfo.map(t => `| ${t.trackNum} | ${t.duration} min |`).join('\n')}`;
+    }
 
     // Build lsdvd info section
     let lsdvdInfo = 'Extended disc metadata not available (lsdvd not installed or failed).';
