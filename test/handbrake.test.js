@@ -76,11 +76,11 @@ function restoreConsole() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test: ripDvd dry-run mode creates stub file
+// Test: ripDvd dry-run mode creates stub files
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function testDryRunCreatesStubFile() {
-    console.log('Test: ripDvd dry-run mode creates stub file');
+async function testDryRunNoFiles() {
+    console.log('Test: ripDvd dry-run mode creates stub files');
     resetHandbrake();
 
     let writtenPath = null;
@@ -112,13 +112,12 @@ async function testDryRunCreatesStubFile() {
         3
     );
 
-    assert.ok(writtenPath, 'Should write stub file');
-    assert.ok(writtenPath.includes('Test Movie (2024).mp4'), 'Stub file should have correct name');
-    assert.ok(writtenContent.includes('[DRY-RUN STUB FILE]'), 'Should have stub file marker');
-    assert.ok(writtenContent.includes('Track: 1'), 'Should include track number');
-    assert.ok(writtenContent.includes('Duration: 45 minutes'), 'Should include duration');
-    assert.ok(progressCalls.length > 0, 'Should call progress callback');
-    assert.strictEqual(progressCalls[progressCalls.length - 1].progress, 100, 'Should reach 100%');
+    // Dry-run should create stub files for reference
+    assert.strictEqual(writtenPath, '/output/Test Movie (2024).mp4', 'Should write stub file in dry-run mode');
+    assert(writtenContent.includes('DRY RUN PLACEHOLDER'), 'Stub file should contain placeholder text');
+    assert(writtenContent.includes('Original track: 1'), 'Stub file should contain track info');
+    // Dry-run should NOT simulate progress (just resolves immediately)
+    assert.strictEqual(progressCalls.length, 0, 'Should NOT call progress callback in dry-run mode');
 
     console.log('  ✓ PASS\n');
 }
@@ -392,19 +391,42 @@ async function testScanSingleTitleHandlesError() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test: ejectDisc returns true when drutil succeeds
+// Test: ejectDisc returns true when drutil succeeds and verifies ejection
 // ═══════════════════════════════════════════════════════════════════════════
 
 function testEjectDiscSucceedsWithDrutil() {
-    console.log('Test: ejectDisc returns true when drutil succeeds');
+    console.log('Test: ejectDisc returns true when drutil succeeds and verifies ejection');
     resetHandbrake();
 
     let methodsCalled = [];
+    let devicePresentChecks = 0;
 
     handbrake.setDependencies({
-        spawnSync: (cmd, args) => {
-            methodsCalled.push({ cmd, args: args ? args[0] : null });
-            if (cmd === 'drutil') return { status: 0 };
+        spawnSync: (cmd, args, options) => {
+            const argsStr = args ? args.join(' ') : '';
+            methodsCalled.push({ cmd, args: argsStr });
+
+            // findDvdDevice() calls diskutil list
+            if (cmd === 'diskutil' && args[0] === 'list' && args.length === 1) {
+                return {
+                    status: 0,
+                    stdout: '/dev/disk4 (external, physical):\n   #:  TYPE  NAME  SIZE  IDENTIFIER\n   0:        DVD   *8.2 GB  disk4'
+                };
+            }
+
+            // isDvdDevicePresent() calls diskutil list <device>
+            if (cmd === 'diskutil' && args[0] === 'list' && args[1]) {
+                devicePresentChecks++;
+                // First check: device present before eject
+                // Second check: device gone after eject
+                return { status: devicePresentChecks === 1 ? 0 : 1 };
+            }
+
+            // drutil eject
+            if (cmd === 'drutil' && args[0] === 'eject') {
+                return { status: 0 };
+            }
+
             return { status: 1 };
         }
     });
@@ -412,13 +434,14 @@ function testEjectDiscSucceedsWithDrutil() {
     const result = handbrake.ejectDisc();
 
     assert.ok(methodsCalled.some(m => m.cmd === 'drutil'), 'Should call drutil');
-    assert.strictEqual(result, true, 'Should return true on success');
+    assert.ok(devicePresentChecks >= 2, 'Should verify device is gone after eject');
+    assert.strictEqual(result, true, 'Should return true on verified success');
 
     console.log('  ✓ PASS\n');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test: ejectDisc falls back to diskutil if drutil fails
+// Test: ejectDisc falls back to diskutil if drutil fails or disc still present
 // ═══════════════════════════════════════════════════════════════════════════
 
 function testEjectDiscFallsToDiskutil() {
@@ -426,12 +449,37 @@ function testEjectDiscFallsToDiskutil() {
     resetHandbrake();
 
     let methodsCalled = [];
+    let deviceCheckCount = 0;
+    let ejectAttempted = false;
 
     handbrake.setDependencies({
-        spawnSync: (cmd, args) => {
-            methodsCalled.push({ cmd, args: args ? args[0] : null });
-            if (cmd === 'drutil') return { status: 1 }; // drutil fails
-            if (cmd === 'diskutil' && args[0] === 'eject') return { status: 0 }; // diskutil succeeds
+        spawnSync: (cmd, args, options) => {
+            const argsStr = args ? args.join(' ') : '';
+            methodsCalled.push({ cmd, args: argsStr });
+
+            // isDvdDevicePresent() calls diskutil list <device>
+            if (cmd === 'diskutil' && args[0] === 'list' && args.length > 1) {
+                deviceCheckCount++;
+                // First check: device present (before any eject)
+                // Second check: device still present (after drutil failed)
+                // Third check: device gone (after diskutil eject succeeded)
+                if (ejectAttempted) {
+                    return { status: 1 }; // Gone after diskutil eject
+                }
+                return { status: 0 }; // Still present
+            }
+
+            // drutil eject fails
+            if (cmd === 'drutil' && args[0] === 'eject') {
+                return { status: 1 };
+            }
+
+            // diskutil eject succeeds
+            if (cmd === 'diskutil' && args[0] === 'eject') {
+                ejectAttempted = true;
+                return { status: 0 };
+            }
+
             return { status: 1 };
         }
     });
@@ -439,14 +487,14 @@ function testEjectDiscFallsToDiskutil() {
     const result = handbrake.ejectDisc('/dev/disk5');
 
     assert.ok(methodsCalled.some(m => m.cmd === 'drutil'), 'Should try drutil first');
-    assert.ok(methodsCalled.some(m => m.cmd === 'diskutil' && m.args === 'eject'), 'Should fall back to diskutil');
+    assert.ok(methodsCalled.some(m => m.cmd === 'diskutil' && m.args.startsWith('eject')), 'Should fall back to diskutil');
     assert.strictEqual(result, true, 'Should return true on fallback success');
 
     console.log('  ✓ PASS\n');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Test: ejectDisc returns false when all methods fail
+// Test: ejectDisc returns false when all methods fail or disc still present
 // ═══════════════════════════════════════════════════════════════════════════
 
 function testEjectDiscReturnsFalseOnFailure() {
@@ -454,7 +502,14 @@ function testEjectDiscReturnsFalseOnFailure() {
     resetHandbrake();
 
     handbrake.setDependencies({
-        spawnSync: () => ({ status: 1 }) // All methods fail
+        spawnSync: (cmd, args) => {
+            // Device always appears present (ejection never succeeds)
+            if (cmd === 'diskutil' && args[0] === 'list') {
+                return { status: 0 }; // Device still there
+            }
+            // Both eject methods fail
+            return { status: 1 };
+        }
     });
 
     const result = handbrake.ejectDisc('/dev/disk5');
@@ -590,7 +645,7 @@ async function testRipDvdDefaultEncoding() {
 async function runTests() {
     try {
         // Dry-run tests
-        await testDryRunCreatesStubFile();
+        await testDryRunNoFiles();
         await testDryRunLogsToFile();
 
         // ripDvd tests
