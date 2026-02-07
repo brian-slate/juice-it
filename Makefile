@@ -1,4 +1,4 @@
-.PHONY: help test test-core test-prompts test-runtime test-openai test-query demo install use-local use-homebrew release release-minor release-major diagnose
+.PHONY: help test test-core test-prompts test-runtime test-openai test-query demo install use-local use-homebrew release release-minor release-major diagnose lint verify
 
 help:
 	@echo "JuiceIt Development Commands"
@@ -8,7 +8,9 @@ help:
 	@echo "  make use-local        - Use LOCAL source code (npm link)"
 	@echo "  make use-homebrew     - Use HOMEBREW release version"
 	@echo ""
-	@echo "Testing:"
+	@echo "Testing & Quality:"
+	@echo "  make lint             - Run ESLint and auto-fix issues"
+	@echo "  make verify           - Run lint + full test suite (USE BEFORE COMMIT)"
 	@echo "  make test             - Run all automated tests"
 	@echo "  make test-core        - Run core functionality tests only"
 	@echo "  make test-prompts     - Run prompt/schema tests only"
@@ -35,6 +37,16 @@ help:
 install:
 	@echo "Installing dependencies..."
 	npm install
+
+lint:
+	@echo "Running ESLint..."
+	@npx eslint . --fix
+
+verify:
+	@echo "Verifying code quality..."
+	@$(MAKE) lint
+	@echo ""
+	@$(MAKE) test
 
 test:
 	npm test

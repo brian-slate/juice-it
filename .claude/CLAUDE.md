@@ -154,10 +154,14 @@ When the user asks to "commit and release" or wants to publish changes, **follow
 - ❌ `git commit` without first running tests manually
 
 **DO** follow the workflow guide:
-1. Stage changes
-2. Run tests/lint manually ONCE
-3. Commit with `--no-verify` (tests already passed)
-4. Run release with `make release` (skips tests with `--skip-tests` flag)
+1. Stage changes: `git add -A`
+2. Verify code quality ONCE: `make verify`
+3. Re-stage any fixes: `git add -A`
+4. Commit with `--no-verify`: `git commit --no-verify -m "..."`
+5. Push: `git push origin main`
+6. Release: `make release` (skips tests automatically)
+
+**Always use Makefile targets** (`make verify`, `make release`) instead of explicit commands (`npm test`, `npx eslint`). This ensures commands stay up-to-date as the project evolves.
 
 See `.claude/skills/release.md` for complete step-by-step instructions.
 

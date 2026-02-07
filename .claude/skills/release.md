@@ -53,23 +53,25 @@ Based on the changes, create a commit message that:
 - Tests → `test:`
 - Build/release/config → `chore:`
 
-### Step 3: Run Tests and Lint ONCE (Before Commit)
+### Step 3: Verify Code Quality ONCE (Before Commit)
 
 ```bash
 # Stage all changes first
 git add -A
 
-# Run ESLint to catch and fix issues
-npx eslint . --fix
+# Run lint + tests via Makefile target
+make verify
 
 # If eslint made changes, re-stage them
 git add -A
-
-# Run full test suite ONCE
-npm test
 ```
 
-**IMPORTANT**: This is the ONLY time tests run in the entire workflow. If tests fail, fix them and re-run. Don't proceed to commit until tests pass.
+**What `make verify` does:**
+- Runs `make lint` (ESLint with auto-fix)
+- Runs `make test` (full test suite)
+- Single command for complete verification
+
+**IMPORTANT**: This is the ONLY time tests run in the entire workflow. If tests fail, fix them and re-run `make verify`. Don't proceed to commit until it passes.
 
 ### Step 4: Commit with --no-verify (Skip Pre-Commit Hook)
 
@@ -169,25 +171,16 @@ cat homebrew/juiceit.rb | grep "version"
 
 ### If Tests Fail (Step 3)
 
-**ESLint Errors:**
+**Verification Failures:**
 ```bash
-# Re-run eslint to fix issues
-npx eslint . --fix
-
-# Re-stage fixed files
-git add -A
-
-# Try tests again
-npm test
-```
-
-**Test Failures:**
-```bash
-# Fix the failing tests
+# Fix the issues (lint or test failures)
 # Add regression test if this was a bug fix (per CLAUDE.md requirements)
 
-# Re-run tests to verify fix
-npm test
+# Re-run verification
+make verify
+
+# Re-stage any changes
+git add -A
 
 # Once passing, proceed to commit with --no-verify
 ```
@@ -269,13 +262,17 @@ git status
 git diff --stat
 # Shows changes to ejection logic and tests
 
-# 2. Generate commit message
+# 2. Verify code quality ONCE
+git add -A
+make verify      # Runs lint + tests
+git add -A       # Re-stage any eslint fixes
+
+# 3. Generate commit message
 # Type: fix (bug fix)
 # Summary: Verify disc ejection actually happens
 
-# 3. Commit
-git add -A
-git commit -m "fix: Verify disc ejection actually happens
+# 4. Commit with --no-verify (already verified)
+git commit --no-verify -m "fix: Verify disc ejection actually happens
 
 The ejectDisc() function now verifies that the disc was physically
 ejected instead of just trusting the exit code. Adds auto-detection
@@ -289,26 +286,23 @@ Changes:
 
 Fixes issue where ejectDisc reported success but disc remained in drive."
 
-# Pre-commit hooks run:
-# - ESLint --fix on staged files
-# - npm test (all test suites)
-# ✅ All hooks pass
+# ✅ Commit succeeds (no hooks run - we already verified)
 
-# 4. Push
+# 5. Push
 git push origin main
 
-# 5. Release (patch - it's a fix)
-make release
+# 6. Release (patch - it's a fix)
+make release     # Uses --skip-tests flag
 
 # Release script runs:
+# - Skips tests (already verified in step 2)
 # - Bumps version 1.8.18 → 1.8.19
-# - Runs full test suite
 # - Creates git tag v1.8.19
 # - Pushes tag
 # - Updates homebrew/juiceit.rb
 # - Commits and pushes Homebrew formula
 
-# 6. Verify
+# 7. Verify
 git describe --tags
 # v1.8.19
 

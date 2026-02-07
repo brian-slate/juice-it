@@ -264,20 +264,19 @@ juiceit --help
 
 **Manual workflow** (if not using Claude):
 ```bash
-# 1. Stage and test
+# 1. Stage and verify
 git add -A
-npx eslint . --fix
-git add -A  # Re-stage any eslint fixes
-npm test    # Run tests ONCE
+make verify    # Runs lint + tests ONCE
+git add -A     # Re-stage any eslint fixes
 
-# 2. Commit (skip pre-commit since we just tested)
+# 2. Commit (skip pre-commit since we just verified)
 git commit --no-verify -m "feat: Your commit message"
 
 # 3. Push
 git push origin main
 
-# 4. Release (skip tests since we just ran them)
-make release        # Uses --skip-tests automatically
+# 4. Release (skip tests since we already ran them)
+make release   # Uses --skip-tests automatically
 ```
 
 See `.claude/skills/release.md` for complete documentation.
