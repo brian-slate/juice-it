@@ -134,30 +134,32 @@ Key functions:
 
 ## Committing and Releasing Changes
 
-### Use the Release Skill
+### Use the Release Workflow Guide
 
-When the user asks to "commit and release" or wants to publish changes, **use the `/release` skill** instead of running individual git/make commands:
+When the user asks to "commit and release" or wants to publish changes, **follow the workflow in `.claude/skills/release.md`**:
 
-```bash
-/release
-```
-
-The release skill handles the complete workflow:
-1. ✅ Analyzes all changes
-2. ✅ Generates appropriate commit message
-3. ✅ Commits with pre-commit hooks (linting + tests)
+**Optimized workflow (tests run ONCE):**
+1. ✅ Analyzes all changes and generates commit message
+2. ✅ Runs ESLint and tests ONCE before committing
+3. ✅ Commits with `--no-verify` (skip redundant pre-commit hook)
 4. ✅ Pushes to remote
-5. ✅ Creates version release (patch/minor/major)
+5. ✅ Creates version release with `make release` (skips tests - already verified)
 6. ✅ Updates Homebrew formula
 
+**Key Optimization**: Tests run 1 time instead of 3 times (before-commit, pre-commit hook, release script).
+
 **DO NOT** run these commands manually:
-- ❌ `git add -A && git commit -m "..." && git push`
-- ❌ `make release`
-- ❌ Individual git/release commands
+- ❌ `git add -A && git commit -m "..." && git push && make release`
+- ❌ Multiple `npm test` runs
+- ❌ `git commit` without first running tests manually
 
-**Instead:** Use `/release` skill which automates the entire process correctly.
+**DO** follow the workflow guide:
+1. Stage changes
+2. Run tests/lint manually ONCE
+3. Commit with `--no-verify` (tests already passed)
+4. Run release with `make release` (skips tests with `--skip-tests` flag)
 
-See `.claude/skills/release.md` for detailed documentation of the release process.
+See `.claude/skills/release.md` for complete step-by-step instructions.
 
 ---
 

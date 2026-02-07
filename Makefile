@@ -70,10 +70,20 @@ use-homebrew:
 	@./bin/update-homebrew.sh --release
 
 release:
-	@./bin/release.sh patch
+	@./bin/release.sh patch --skip-tests
 
 release-minor:
-	@./bin/release.sh minor
+	@./bin/release.sh minor --skip-tests
 
 release-major:
+	@./bin/release.sh major --skip-tests
+
+# Force full validation (run tests even if pre-commit already did)
+release-with-tests:
+	@./bin/release.sh patch
+
+release-minor-with-tests:
+	@./bin/release.sh minor
+
+release-major-with-tests:
 	@./bin/release.sh major

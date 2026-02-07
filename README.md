@@ -240,42 +240,47 @@ vim juiceit.js
 # 3. Test immediately (no rebuild needed!)
 juiceit --help
 
-# 4. Run tests before committing
-npm test
-
-# 5. Commit and release when ready
-/release    # Use the Claude Code release skill
+# 4. When ready to commit and release, ask Claude:
+"commit and release"    # Claude follows optimized workflow
 ```
 
 ### Committing and Releasing
 
-**Use the `/release` skill** to automate the complete commit and release workflow:
+**Ask Claude to "commit and release"** - it will follow the optimized workflow:
 
+**Optimized Workflow** (tests run ONCE):
+1. Analyzes all changes and generates commit message
+2. Runs ESLint + tests ONCE before committing
+3. Commits with `--no-verify` (skip redundant pre-commit hook)
+4. Pushes to remote
+5. Creates release with `make release --skip-tests`
+6. Updates Homebrew formula
+
+**Key Benefits:**
+- ✅ Tests run 1 time instead of 3 times
+- ✅ Saves ~1-2 minutes per release
+- ✅ Maintains same code quality guarantees
+- ✅ Smart `--no-verify` only used after verification
+
+**Manual workflow** (if not using Claude):
 ```bash
-/release
+# 1. Stage and test
+git add -A
+npx eslint . --fix
+git add -A  # Re-stage any eslint fixes
+npm test    # Run tests ONCE
+
+# 2. Commit (skip pre-commit since we just tested)
+git commit --no-verify -m "feat: Your commit message"
+
+# 3. Push
+git push origin main
+
+# 4. Release (skip tests since we just ran them)
+make release        # Uses --skip-tests automatically
 ```
 
-This skill handles:
-- ✅ Analyzes all changes (modified and untracked files)
-- ✅ Generates conventional commit message with high-level summary
-- ✅ Commits changes (pre-commit hooks run linting + tests automatically)
-- ✅ Pushes to remote repository
-- ✅ Determines appropriate version bump (patch/minor/major)
-- ✅ Creates release using Makefile commands
-- ✅ Updates Homebrew formula
-- ✅ Verifies release success
-
-**DO NOT run these commands manually:**
-- ❌ `git add -A && git commit && git push && make release`
-- ❌ Individual git or release commands
-
-The `/release` skill ensures:
-- Proper commit message format (conventional commits)
-- Pre-commit hooks run (ESLint + tests)
-- Correct version bumping based on change type
-- All release steps execute in correct order
-
-See `.claude/skills/release.md` for detailed documentation.
+See `.claude/skills/release.md` for complete documentation.
 
 ### Logging Guidelines
 

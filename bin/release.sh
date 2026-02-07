@@ -5,11 +5,18 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
 TAP_REPO="$HOME/code/personal/homebrew-juice-it"
 FORMULA_FILE="$TAP_REPO/Formula/juice-it.rb"
+
+# Parse flags
+SKIP_TESTS=false
+if [[ "$*" == *"--skip-tests"* ]]; then
+    SKIP_TESTS=true
+fi
 
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}  JuiceIt Release Script${NC}"
@@ -33,20 +40,35 @@ fi
 CURRENT_VERSION=$(node -p "require('./package.json').version")
 echo -e "Current version: ${YELLOW}v$CURRENT_VERSION${NC}"
 
-# Determine bump type (default: patch)
-BUMP_TYPE="${1:-patch}"
+# Determine bump type (default: patch, filter out --skip-tests flag)
+BUMP_TYPE="patch"
+for arg in "$@"; do
+    if [[ "$arg" != "--skip-tests" ]]; then
+        BUMP_TYPE="$arg"
+        break
+    fi
+done
 echo -e "Bump type: ${YELLOW}$BUMP_TYPE${NC}"
+
+if [ "$SKIP_TESTS" = true ]; then
+    echo -e "${BLUE}ℹ️  Skipping tests (assuming pre-commit hooks already verified)${NC}"
+fi
 echo ""
 
-# Step 1: Run tests
-echo -e "${GREEN}[1/9] Running tests...${NC}"
-npm test
-echo ""
+# Step 1: Run tests (optional)
+if [ "$SKIP_TESTS" = false ]; then
+    echo -e "${GREEN}[1/9] Running tests...${NC}"
+    npm test
+    echo ""
 
-# Step 2: Run lint
-echo -e "${GREEN}[2/9] Running lint...${NC}"
-npm run lint
-echo ""
+    # Step 2: Run lint
+    echo -e "${GREEN}[2/9] Running lint...${NC}"
+    npm run lint
+    echo ""
+else
+    echo -e "${BLUE}[1-2/9] Skipped tests and lint (--skip-tests flag)${NC}"
+    echo ""
+fi
 
 # Step 3: Bump version
 echo -e "${GREEN}[3/9] Bumping version ($BUMP_TYPE)...${NC}"
