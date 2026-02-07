@@ -62,7 +62,7 @@ After installation, configure your API keys:
 2. **Get an OpenAI API key** from [OpenAI Platform](https://platform.openai.com/api-keys)
    - Create an account at https://platform.openai.com/signup
    - Go to API Keys and create a new key
-   - **Cost:** ~$0.001-0.002 per disc (uses GPT-4o-mini)
+   - **Cost:** ~$0.002-0.03 per disc (gpt-4o-mini to gpt-4o)
    - **Benefits:**
      - Automatic TMDB match selection
      - Intelligent track-to-episode mapping
@@ -242,7 +242,40 @@ juiceit --help
 
 # 4. Run tests before committing
 npm test
+
+# 5. Commit and release when ready
+/release    # Use the Claude Code release skill
 ```
+
+### Committing and Releasing
+
+**Use the `/release` skill** to automate the complete commit and release workflow:
+
+```bash
+/release
+```
+
+This skill handles:
+- ✅ Analyzes all changes (modified and untracked files)
+- ✅ Generates conventional commit message with high-level summary
+- ✅ Commits changes (pre-commit hooks run linting + tests automatically)
+- ✅ Pushes to remote repository
+- ✅ Determines appropriate version bump (patch/minor/major)
+- ✅ Creates release using Makefile commands
+- ✅ Updates Homebrew formula
+- ✅ Verifies release success
+
+**DO NOT run these commands manually:**
+- ❌ `git add -A && git commit && git push && make release`
+- ❌ Individual git or release commands
+
+The `/release` skill ensures:
+- Proper commit message format (conventional commits)
+- Pre-commit hooks run (ESLint + tests)
+- Correct version bumping based on change type
+- All release steps execute in correct order
+
+See `.claude/skills/release.md` for detailed documentation.
 
 ### Logging Guidelines
 

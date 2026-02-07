@@ -132,6 +132,35 @@ Key functions:
 
 ---
 
+## Committing and Releasing Changes
+
+### Use the Release Skill
+
+When the user asks to "commit and release" or wants to publish changes, **use the `/release` skill** instead of running individual git/make commands:
+
+```bash
+/release
+```
+
+The release skill handles the complete workflow:
+1. ✅ Analyzes all changes
+2. ✅ Generates appropriate commit message
+3. ✅ Commits with pre-commit hooks (linting + tests)
+4. ✅ Pushes to remote
+5. ✅ Creates version release (patch/minor/major)
+6. ✅ Updates Homebrew formula
+
+**DO NOT** run these commands manually:
+- ❌ `git add -A && git commit -m "..." && git push`
+- ❌ `make release`
+- ❌ Individual git/release commands
+
+**Instead:** Use `/release` skill which automates the entire process correctly.
+
+See `.claude/skills/release.md` for detailed documentation of the release process.
+
+---
+
 ## Common Tasks
 
 ### Adding a new CLI flag
@@ -159,6 +188,37 @@ console.log('  ✓ Operation completed');
 
 ---
 
+## Testing Requirements
+
+### Always Add Tests for Bug Fixes
+
+**CRITICAL:** When you fix a bug, ALWAYS add a test that:
+1. **Reproduces the bug** - The test should fail before the fix
+2. **Verifies the fix** - The test should pass after the fix
+3. **Prevents regression** - If the bug returns, the test will catch it
+
+**Example workflow:**
+```javascript
+// 1. User reports: "Back navigation doesn't work in interactive mode"
+// 2. Add test that verifies back navigation returns correct marker
+async function testReviewAndMapBackNavigation() {
+    enquirerMock.setResponses(['← Back to confirmation menu']);
+    const result = await reviewAndMapEpisodesBeforeRip(...);
+    assert.strictEqual(result._action, 'back');
+}
+// 3. Implement the fix
+// 4. Verify test passes
+```
+
+**Where to add tests:**
+- UI/menu bugs → `test/interactive-mode.test.js`
+- Naming bugs → `test/naming.test.js`
+- CLI parsing bugs → `test/cli.test.js`
+- Metadata bugs → `test/metadata.test.js`
+- Ripping bugs → `test/handbrake.test.js`
+
+---
+
 ## Feature Complete Checklist
 
 Before committing a completed feature, run these checks:
@@ -172,6 +232,9 @@ npm test
 
 # 3. Verify help text if you added/changed flags
 node juiceit.js --help
+
+# 4. If you fixed a bug, verify the new test exists and passes
+npm test -- <test-file-name>
 ```
 
 **Note:** ESLint and tests also run automatically on pre-commit via husky/lint-staged, but running them manually first catches issues earlier and avoids commit failures.
