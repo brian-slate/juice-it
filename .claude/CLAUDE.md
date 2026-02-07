@@ -6,78 +6,43 @@ JuiceIt is a smart DVD ripper with automatic metadata lookup (TMDB) and AI-power
 
 ---
 
-## Critical: Logging vs Console Output
-
-### Use `logger` for Debug/Internal Output
-
-```javascript
-const { getLogger } = require('./lib/logger');
-const logger = getLogger();
-
-// Debug info - only shown with --verbose flag
-logger.debug('Processing track...');
-logger.debug(`API response: ${JSON.stringify(data)}`);
-
-// Errors - always shown AND logged to file
-logger.error('Connection failed');
-
-// File-only logging
-logger.fileOnly('Detailed dump for log file only');
-```
-
-### Use `console.log` for User-Facing Output
-
-```javascript
-// Progress, status, formatted output for users
-console.log('🔍 Scanning disc...');
-console.log('  ✓ Found 8 episodes');
-console.log('━'.repeat(60));
-```
-
-### DO NOT
-
-```javascript
-// ❌ NEVER use verbose wrapper - logger handles this
-if (options.verbose) {
-    console.log('debug info');
-}
-
-// ❌ NEVER use console.error - use logger.error
-console.error('something failed');
-```
-
----
-
-## When to Suggest UI Library Migration
-
-If the developer asks about output formatting, or you notice the project needs better terminal handling, suggest UI library migration when ANY of these are true:
-
-1. **Console.log count exceeds ~700** (currently ~550)
-2. **User reports piping issues** (colors not disabling)
-3. **Need for `--quiet` or `--json` modes**
-4. **Windows terminal compatibility issues**
-5. **Need for advanced UI** (progress bars, complex spinners)
-
-A UI library (`lib/ui.js`) already exists but is not yet integrated. See `CONTRIBUTING.md` for migration plan.
-
----
-
 ## Project Structure
 
 ```
 juice-it/
 ├── juiceit.js          # Main application (3400+ lines)
 ├── lib/
+│   ├── cli.js          # CLI argument parsing
+│   ├── disc.js         # Disc detection and scanning
+│   ├── handbrake.js    # HandBrakeCLI integration + disc ejection
+│   ├── interactive.js  # Interactive mode UI
 │   ├── logger.js       # Logging utility (USE THIS for debug)
-│   └── ui.js           # UI utility (NOT YET INTEGRATED)
+│   ├── mapping.js      # Track-to-episode mapping
+│   ├── metadata.js     # TMDB metadata lookup
+│   ├── naming.js       # Plex-compatible file naming
+│   ├── pricing.js      # AI cost estimation
+│   ├── rip.js          # Core ripping logic
+│   └── setup.js        # First-run setup
 ├── prompts/
 │   ├── loader.js       # Prompt template system
 │   ├── schemas.js      # Zod schemas for AI responses
 │   └── *.md            # Prompt templates
 ├── config/
-│   └── ai-config.js    # AI model configuration
+│   ├── ai-config.js    # AI model configuration
+│   └── pricing.json    # AI pricing data
 ├── test/               # Test suites
-└── homebrew/           # Homebrew formula
+├── homebrew/           # Homebrew formula
+├── .husky/
+│   ├── pre-commit      # Lint-staged + tests (skipped by --no-verify)
+│   └── commit-msg      # Conventional commit format validation
+├── .claude/
+│   ├── rules/          # Coding conventions (loaded at startup)
+│   │   ├── logging.md  # Logger vs console.log conventions
+│   │   ├── testing.md  # Test requirements and checklist
+│   │   └── commands.md # Makefile-first command usage
+│   └── skills/
+│       └── release/    # /release skill (commit + release workflow)
+└── Makefile            # Canonical dev commands (always check here first)
 ```
 
 ---
@@ -92,16 +57,14 @@ juice-it/
 
 ### TV vs Movie Handling
 
-The codebase handles TV shows and movies differently:
-
-- **Detection**: `guessMediaType(numTitles)` - if disc has ≥3 titles, it's likely TV; otherwise movie
-- **TV Shows**: Get AI-powered episode mapping (track→episode), season metadata from TMDB
+- **Detection**: `guessMediaType(numTitles)` - if disc has >=3 titles, it's likely TV; otherwise movie
+- **TV Shows**: Get AI-powered episode mapping (track->episode), season metadata from TMDB
 - **Movies**: Get title and year from TMDB, single main file
 - **Extras**: Both types can have extras - use `--include-extras` to rip them
 
 ### Plex-Compatible File Naming
 
-All files are named in Plex-compatible format (see [Plex Support](https://support.plex.tv/articles/naming-and-organizing-your-movie-media-files/)):
+All files are named in Plex-compatible format:
 
 - **Movies**: `Movie Name (Year).mp4`
 - **TV Shows**: `Show Name (Year) - s01e01 - Episode Title.mp4`
@@ -121,106 +84,27 @@ Key functions:
 
 ## Makefile Commands (IMPORTANT)
 
-**Before running any development commands, check the Makefile first.** The Makefile is the canonical source for:
+**The Makefile is the single source of truth for all dev commands.** See `.claude/rules/commands.md` for the full list of do's and don'ts.
 
-- **Testing** (running tests, specific test suites, query testing)
-- **Development setup** (installing dependencies, switching between local/Homebrew versions)
-- **Releasing** (patch, minor, major version releases)
-- **Diagnostics** (demo mode, diagnostic analysis)
-
-**Always run `make help` to see available commands** before running one-off shell commands or scripts directly. Do NOT run scripts from `bin/` directly - use the Makefile targets instead.
+Key targets: `make verify` (lint+test), `make test`, `make lint`, `make release`
 
 ---
 
-## Committing and Releasing Changes (CRITICAL)
+## Committing and Releasing Changes
 
-**MANDATORY**: When the user asks to "commit", "release", "commit and release", "push", or any variation:
-
-1. **FIRST**: Read `.claude/skills/release.md` (the full workflow guide)
-2. **THEN**: Follow its steps exactly - do not improvise or use ad-hoc commands
-3. **ALWAYS**: Use Makefile targets (`make verify`, `make release`) instead of direct commands (`npm test`, `npx eslint`)
-
-The workflow guide is the **single source of truth** for the release process. Do NOT inline or memorize the steps - always read the file to get the latest version.
-
-**Key principles (see skill file for full details):**
-- Tests and lint run ONCE via `make verify` (not multiple times)
-- Commit uses `--no-verify` after verification passes
-- Release uses `make release` which skips redundant tests
-- Makefile targets are the canonical commands (never use `npm test` directly)
+Use the `/release` skill. It handles the full workflow: analyze changes, generate commit message, `make verify`, commit, push, and `make release`.
 
 ---
 
 ## Common Tasks
 
 ### Adding a new CLI flag
-1. Add to options parsing (~line 880 in juiceit.js)
-2. Add to `showHelp()` function
+1. Add to options parsing in `lib/cli.js`
+2. Add to help text in `lib/help.js`
 3. Use `logger.debug()` for any debug output related to the flag
 
 ### Adding debug output
-```javascript
-// ✅ Correct
-logger.debug(`New feature processing: ${data}`);
+See `.claude/rules/logging.md` for conventions.
 
-// ❌ Wrong
-if (options.verbose) console.log('debug');
-```
-
-### Adding user-facing output
-```javascript
-// ✅ Correct (for now)
-console.log('  ✓ Operation completed');
-
-// Future: When UI lib is integrated
-// ui.success('Operation completed');
-```
-
----
-
-## Testing Requirements
-
-### Always Add Tests for Bug Fixes
-
-**CRITICAL:** When you fix a bug, ALWAYS add a test that:
-1. **Reproduces the bug** - The test should fail before the fix
-2. **Verifies the fix** - The test should pass after the fix
-3. **Prevents regression** - If the bug returns, the test will catch it
-
-**Example workflow:**
-```javascript
-// 1. User reports: "Back navigation doesn't work in interactive mode"
-// 2. Add test that verifies back navigation returns correct marker
-async function testReviewAndMapBackNavigation() {
-    enquirerMock.setResponses(['← Back to confirmation menu']);
-    const result = await reviewAndMapEpisodesBeforeRip(...);
-    assert.strictEqual(result._action, 'back');
-}
-// 3. Implement the fix
-// 4. Verify test passes
-```
-
-**Where to add tests:**
-- UI/menu bugs → `test/interactive-mode.test.js`
-- Naming bugs → `test/naming.test.js`
-- CLI parsing bugs → `test/cli.test.js`
-- Metadata bugs → `test/metadata.test.js`
-- Ripping bugs → `test/handbrake.test.js`
-
----
-
-## Feature Complete Checklist
-
-Before committing a completed feature:
-
-```bash
-# 1. Run lint + full test suite (single command)
-make verify
-
-# 2. Verify help text if you added/changed flags
-node juiceit.js --help
-
-# 3. If you fixed a bug, verify the new test exists and passes
-make test
-```
-
-**Then follow the release workflow** in `.claude/skills/release.md` to commit and release.
+### Adding or fixing tests
+See `.claude/rules/testing.md` for requirements.

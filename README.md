@@ -279,7 +279,7 @@ git push origin main
 make release   # Uses --skip-tests automatically
 ```
 
-See `.claude/skills/release.md` for complete documentation.
+See `.claude/skills/release/SKILL.md` for complete documentation.
 
 ### Logging Guidelines
 
@@ -310,9 +310,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the migration plan.
 ### Testing
 
 ```bash
-npm test              # Run all tests
-npm run test:core     # Core functionality only
-npm run demo          # Interactive demo
+make test             # Run all tests
+make test-core        # Core functionality only
+make verify           # Run lint + tests (use before commit)
+make demo             # Interactive demo
 juiceit --scan-only   # Test with real DVD
 juiceit --diagnose    # Detailed diagnostic output
 ```
@@ -320,7 +321,9 @@ juiceit --diagnose    # Detailed diagnostic output
 ### Documentation
 
 - `CONTRIBUTING.md` - Development guidelines and logging/UI architecture
-- `.claude/CLAUDE.md` - AI assistant instructions
+- `.claude/CLAUDE.md` - AI assistant instructions (project context)
+- `.claude/rules/` - Coding conventions (logging, testing)
+- `.claude/skills/release/` - Commit and release workflow
 - `juiceit --help-dev` - Developer commands (make targets, npm scripts)
 
 ## Contributing
