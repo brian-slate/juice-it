@@ -132,38 +132,21 @@ Key functions:
 
 ---
 
-## Committing and Releasing Changes
+## Committing and Releasing Changes (CRITICAL)
 
-### Use the Release Workflow Guide
+**MANDATORY**: When the user asks to "commit", "release", "commit and release", "push", or any variation:
 
-When the user asks to "commit and release" or wants to publish changes, **follow the workflow in `.claude/skills/release.md`**:
+1. **FIRST**: Read `.claude/skills/release.md` (the full workflow guide)
+2. **THEN**: Follow its steps exactly - do not improvise or use ad-hoc commands
+3. **ALWAYS**: Use Makefile targets (`make verify`, `make release`) instead of direct commands (`npm test`, `npx eslint`)
 
-**Optimized workflow (tests run ONCE):**
-1. ✅ Analyzes all changes and generates commit message
-2. ✅ Runs ESLint and tests ONCE before committing
-3. ✅ Commits with `--no-verify` (skip redundant pre-commit hook)
-4. ✅ Pushes to remote
-5. ✅ Creates version release with `make release` (skips tests - already verified)
-6. ✅ Updates Homebrew formula
+The workflow guide is the **single source of truth** for the release process. Do NOT inline or memorize the steps - always read the file to get the latest version.
 
-**Key Optimization**: Tests run 1 time instead of 3 times (before-commit, pre-commit hook, release script).
-
-**DO NOT** run these commands manually:
-- ❌ `git add -A && git commit -m "..." && git push && make release`
-- ❌ Multiple `npm test` runs
-- ❌ `git commit` without first running tests manually
-
-**DO** follow the workflow guide:
-1. Stage changes: `git add -A`
-2. Verify code quality ONCE: `make verify`
-3. Re-stage any fixes: `git add -A`
-4. Commit with `--no-verify`: `git commit --no-verify -m "..."`
-5. Push: `git push origin main`
-6. Release: `make release` (skips tests automatically)
-
-**Always use Makefile targets** (`make verify`, `make release`) instead of explicit commands (`npm test`, `npx eslint`). This ensures commands stay up-to-date as the project evolves.
-
-See `.claude/skills/release.md` for complete step-by-step instructions.
+**Key principles (see skill file for full details):**
+- Tests and lint run ONCE via `make verify` (not multiple times)
+- Commit uses `--no-verify` after verification passes
+- Release uses `make release` which skips redundant tests
+- Makefile targets are the canonical commands (never use `npm test` directly)
 
 ---
 
@@ -227,20 +210,17 @@ async function testReviewAndMapBackNavigation() {
 
 ## Feature Complete Checklist
 
-Before committing a completed feature, run these checks:
+Before committing a completed feature:
 
 ```bash
-# 1. Run ESLint to catch and fix issues
-npx eslint . --fix
+# 1. Run lint + full test suite (single command)
+make verify
 
-# 2. Run full test suite
-npm test
-
-# 3. Verify help text if you added/changed flags
+# 2. Verify help text if you added/changed flags
 node juiceit.js --help
 
-# 4. If you fixed a bug, verify the new test exists and passes
-npm test -- <test-file-name>
+# 3. If you fixed a bug, verify the new test exists and passes
+make test
 ```
 
-**Note:** ESLint and tests also run automatically on pre-commit via husky/lint-staged, but running them manually first catches issues earlier and avoids commit failures.
+**Then follow the release workflow** in `.claude/skills/release.md` to commit and release.
