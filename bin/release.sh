@@ -80,7 +80,12 @@ echo ""
 # Step 4: Commit and tag
 echo -e "${GREEN}[4/9] Committing and tagging...${NC}"
 git add package.json package-lock.json
-git commit -m "chore: Bump version to $NEW_VERSION"
+if [ "$SKIP_TESTS" = true ]; then
+    # Tests already verified before this release - skip pre-commit hook
+    git commit --no-verify -m "chore: Bump version to $NEW_VERSION"
+else
+    git commit -m "chore: Bump version to $NEW_VERSION"
+fi
 git tag "v$NEW_VERSION"
 echo ""
 

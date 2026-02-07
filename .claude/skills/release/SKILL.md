@@ -29,7 +29,7 @@ The project has two git hooks (via husky):
 - Tests already passed via `make verify`
 - This skill generates the commit message in conventional format
 
-The `commit-msg` hook still protects manual human commits (which don't use `--no-verify`). The release script's version bump commit (`chore: Bump version to X.X.X`) also goes through the hook normally.
+The `commit-msg` hook still protects manual human commits (which don't use `--no-verify`). The release script's version bump commit (`chore: Bump version to X.X.X`) also uses `--no-verify` when `--skip-tests` is active, avoiding a redundant pre-commit test run. When running `make release-with-tests`, the version bump commit goes through hooks normally.
 
 ## Steps
 
