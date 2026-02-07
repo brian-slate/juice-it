@@ -252,6 +252,46 @@ function testMainOnlyFlag() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Test: --rip-all flag
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testRipAllFlag() {
+    console.log('Test: --rip-all flag is properly implemented');
+
+    const juiceItContent = fs.readFileSync(JUICEIT_PATH, 'utf-8');
+    const cliContent = fs.readFileSync(path.join(__dirname, '../lib/cli.js'), 'utf-8');
+    const helpContent = fs.readFileSync(path.join(__dirname, '../lib/help.js'), 'utf-8');
+
+    // Check that rip-all option is parsed
+    assert(
+        cliContent.includes("'--rip-all'"),
+        'cli module should parse --rip-all flag'
+    );
+    assert(
+        cliContent.includes('options.ripAll'),
+        'cli module should set options.ripAll'
+    );
+
+    // Check that ripAll is used in the codebase
+    assert(
+        juiceItContent.includes("options.ripAll"),
+        'juiceit.js should handle ripAll option'
+    );
+
+    // Check that help mentions the flag
+    assert(
+        helpContent.includes('--rip-all'),
+        'help text should mention --rip-all flag'
+    );
+    assert(
+        helpContent.includes('Play All'),
+        'help text should explain what --rip-all does'
+    );
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Test: Skipped tracks are tracked separately
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -349,6 +389,42 @@ function testPositionalArgumentSupport() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Test: Dry-run mode creates stub files
+// ═══════════════════════════════════════════════════════════════════════════
+
+function testDryRunCreatesStubFiles() {
+    console.log('Test: Dry-run mode creates stub files instead of encoding');
+
+    const ripContent = fs.readFileSync(path.join(__dirname, '../lib/rip.js'), 'utf-8');
+
+    // Check that fs module is imported
+    assert(
+        ripContent.includes("const fs = require('fs')"),
+        'rip module should import fs for stub file creation'
+    );
+
+    // Check that stub file creation code exists
+    assert(
+        ripContent.includes('fs.writeFileSync(stubFilePath'),
+        'rip module should create stub files with fs.writeFileSync in dry-run mode'
+    );
+
+    // Check that stub file path is constructed
+    assert(
+        ripContent.includes('const stubFilePath = path.join(options.outputDir, finalFileName)'),
+        'rip module should construct stub file path'
+    );
+
+    // Check that dry-run completion message mentions stub files
+    assert(
+        ripContent.includes('only stub files were created'),
+        'rip module should mention stub file creation in completion message'
+    );
+
+    console.log('  ✓ PASS\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Run all tests
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -360,9 +436,11 @@ try {
     testDryRunFlagRecognized();
     testPlexNamingInCode();
     testMainOnlyFlag();
+    testRipAllFlag();
     testSkippedTracksTracking();
     testSummaryShowsSkippedTracks();
     testPositionalArgumentSupport();
+    testDryRunCreatesStubFiles();
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  ✅ All end-to-end tests passed!');

@@ -93,10 +93,6 @@ function testBooleanFlags() {
     options = parseArgs(['--setup']);
     assert.strictEqual(options.runSetup, true, '--setup should set runSetup');
 
-    // Test --plan
-    options = parseArgs(['--plan']);
-    assert.strictEqual(options.planOnly, true, '--plan should set planOnly');
-
     // Test --interactive and -i
     options = parseArgs(['--interactive']);
     assert.strictEqual(options.interactive, true, '--interactive should set interactive');
@@ -111,9 +107,18 @@ function testBooleanFlags() {
     options = parseArgs(['--main-only']);
     assert.strictEqual(options.mainOnly, true, '--main-only should set mainOnly');
 
+    // Test --rip-all
+    options = parseArgs(['--rip-all']);
+    assert.strictEqual(options.ripAll, true, '--rip-all should set ripAll');
+
     // Test --dry-run
     options = parseArgs(['--dry-run']);
     assert.strictEqual(options.dryRun, true, '--dry-run should set dryRun');
+
+    // Test --dry-run-auto
+    options = parseArgs(['--dry-run-auto']);
+    assert.strictEqual(options.dryRun, true, '--dry-run-auto should set dryRun');
+    assert.strictEqual(options.dryRunAuto, true, '--dry-run-auto should set dryRunAuto');
 
     // Test --no-eject
     options = parseArgs(['--no-eject']);

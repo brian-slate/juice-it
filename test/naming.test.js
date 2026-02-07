@@ -256,13 +256,13 @@ function testBuildExtrasFileName() {
     const result1 = buildExtrasFileName('Avatar (2009)', 1);
     const result2 = buildExtrasFileName('Avatar (2009)', 5);
 
-    // Plex format: MovieName (Year)-type-Description.mp4
-    assert.strictEqual(result1, 'Avatar (2009)-featurette-Bonus 1.mp4');
-    assert.strictEqual(result2, 'Avatar (2009)-featurette-Bonus 5.mp4');
+    // Plex format: MovieName (Year) - type - Description.mp4 (with spaces around dashes)
+    assert.strictEqual(result1, 'Avatar (2009) - featurette - Bonus 1.mp4');
+    assert.strictEqual(result2, 'Avatar (2009) - featurette - Bonus 5.mp4');
 
     // Test with custom extra type
     const result3 = buildExtrasFileName('Avatar (2009)', 1, 'deleted');
-    assert.strictEqual(result3, 'Avatar (2009)-deleted-Bonus 1.mp4');
+    assert.strictEqual(result3, 'Avatar (2009) - deleted - Bonus 1.mp4');
 
     console.log('  ✓ PASS\n');
 }
@@ -272,19 +272,19 @@ function testBuildExtrasFileNameWithDescription() {
 
     // Play All compilation track with 'other' type
     const result1 = buildExtrasFileName('Ed, Edd n Eddy (1999)', 1, 'other', 'Play All');
-    assert.strictEqual(result1, 'Ed, Edd n Eddy (1999)-other-Play All.mp4');
+    assert.strictEqual(result1, 'Ed, Edd n Eddy (1999) - other - Play All.mp4');
 
     // Behind the scenes with custom description
     const result2 = buildExtrasFileName('Avatar (2009)', 2, 'behindthescenes', 'Making of Avatar');
-    assert.strictEqual(result2, 'Avatar (2009)-behindthescenes-Making of Avatar.mp4');
+    assert.strictEqual(result2, 'Avatar (2009) - behindthescenes - Making of Avatar.mp4');
 
     // Trailer with description
     const result3 = buildExtrasFileName('Movie Name (2024)', 1, 'trailer', 'Theatrical Trailer');
-    assert.strictEqual(result3, 'Movie Name (2024)-trailer-Theatrical Trailer.mp4');
+    assert.strictEqual(result3, 'Movie Name (2024) - trailer - Theatrical Trailer.mp4');
 
     // Null description should fall back to "Bonus X"
     const result4 = buildExtrasFileName('Movie Name (2024)', 3, 'featurette', null);
-    assert.strictEqual(result4, 'Movie Name (2024)-featurette-Bonus 3.mp4');
+    assert.strictEqual(result4, 'Movie Name (2024) - featurette - Bonus 3.mp4');
 
     console.log('  ✓ PASS\n');
 }

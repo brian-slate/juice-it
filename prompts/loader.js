@@ -374,43 +374,53 @@ First episode track should use episodeIndex=${startEpisodeOverride - 1}.
 Season ${metadata.season} has ${totalEpisodes} total episodes.
 `;
     } else if (discNumber && discNumber > 1 && totalEpisodes > 0) {
-        // Let AI determine starting episode by counting episodes on this disc
+        // Calculate estimated episodes per disc based on TMDB runtime data
+        const avgRuntime = runtimeAnalysis?.avg || 22;
+        const epsPerTrack = avgRuntime <= 15 ? 2 : 1; // Short eps (11-15 min) = 2 per track
+        const tracksPerDisc = 6; // Typical DVD holds ~6 episode tracks
+        const epsPerDisc = tracksPerDisc * epsPerTrack;
+        const estimatedDiscs = Math.ceil(totalEpisodes / epsPerDisc);
+
+        // Estimate starting episode for Disc 2
+        const disc1Episodes = Math.ceil(totalEpisodes / estimatedDiscs);
+        const estimatedStartEp = disc1Episodes + 1;
+
         discContext = `### 1E. Multi-Disc Context (REQUIRES YOUR ANALYSIS)
 
 **User query mentioned Disc ${discNumber}** for Season ${metadata.season}. IGNORE the user's disc number - check the **DVD Volume Name** above instead.
 
-⚠️ **CRITICAL: Calculate Starting Episode from Track Analysis**
+**Season Overview:**
+- Season ${metadata.season} has **${totalEpisodes} total episodes**
+- Estimated discs needed: ~${estimatedDiscs} (based on ${avgRuntime}-min episodes)
+- Estimated episodes per disc: ~${epsPerDisc}
+
+⚠️ **CRITICAL: Determine Episode Start Position**
 
 **Step 1: Identify the disc number from volume name**
-Look for patterns: \`DISC_ONE\`, \`DISC_TWO\`, \`D1\`, \`D2\`, \`S${metadata.season}D1\`, \`S${metadata.season}D2\`, etc.
+Look for patterns: \`S${metadata.season}D1\`, \`S${metadata.season}D2\`, \`DISC_ONE\`, \`DISC_TWO\`, etc.
 
-**Step 2: If this is NOT Disc 1, count episodes on THIS disc**
-1. Count episode-length tracks (exclude Play All, menus, extras)
-2. For each track, determine episodes it contains by comparing track duration to TMDB episode runtimes:
-   - Track ~1x episode runtime → 1 episode
-   - Track ~2x episode runtime → 2 episodes
-   - Track matching a specific longer episode (check TMDB data!) → 1 episode
-3. Sum up total episodes on this disc
+**Step 2: Calculate starting episode**
+- **If Disc 1**: Start at Episode 1
+- **If Disc 2**: Likely starts around Episode ${estimatedStartEp} (but verify with track count)
 
-**Step 3: Calculate starting episode**
-\`\`\`
-startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1
-\`\`\`
+**Step 3: count episodes on THIS disc**
+- Count ALL episode-length tracks (exclude Play All)
+- For ${avgRuntime <= 15 ? '~22 min tracks with 11-min episodes' : 'single-episode tracks'}: ${avgRuntime <= 15 ? 'each track = 2 episodes' : 'each track = 1 episode'}
+- **Expected episodes** = track count × ${epsPerTrack}
+- Alternative formula: \`startEpisode = totalSeasonEpisodes - episodesOnThisDisc + 1\`
 
-**Example for Season ${metadata.season} (${totalEpisodes} episodes):**
-- If this disc has 6 tracks with ~22 min each (11 min episodes)
-- Check TMDB: Is there a double-length episode (22 min single)?
-- If 5 tracks × 2 eps + 1 track × 1 double-length ep = 11 episodes
-- startEpisode = ${totalEpisodes} - 11 + 1 = ${totalEpisodes - 11 + 1}
+**Step 4: Handle extra tracks**
+- DVDs sometimes have MORE episode-length tracks than actual episodes
+- If you find MORE episode-length tracks than expected episodes:
+  - Map the **FIRST** tracks to cover the remaining season episodes
+  - Mark **EXTRA** episode-length tracks as \`extraType: "featurette"\` with \`extraDescription: "Extra Track"\`
 
-**IMPORTANT: Check TMDB episode runtimes!**
-Some episodes are double-length (22+ min) - these take a full track for just 1 episode.
-A season finale or special is often double-length. Look at the runtime column in the episode table above.
-
-**If volume name indicates Disc 1:**
-- Episodes start from Episode 1 (episodeIndex=0)
-
-**Verification:** After calculating, verify the episode titles match expectations. The first episode title on this disc should logically follow the last episode on the previous disc.
+**Example for this disc:**
+- If volume name shows "S${metadata.season}D2" → This is Disc 2
+- Estimated start: Episode ${estimatedStartEp}
+- Episodes remaining: ${totalEpisodes} - ${estimatedStartEp - 1} = ${totalEpisodes - estimatedStartEp + 1}
+- You need ~${Math.ceil((totalEpisodes - estimatedStartEp + 1) / epsPerTrack)} episode-length tracks
+- Map FIRST ${Math.ceil((totalEpisodes - estimatedStartEp + 1) / epsPerTrack)} episode-length tracks, any extras are bonus content
 `;
     } else if (discNumber === 1) {
         discContext = `### 1E. Multi-Disc Context

@@ -15,6 +15,8 @@ const testFiles = [
     'openai-api.test.js',
     'naming.test.js',
     'cli.test.js',
+    'mapping.test.js',
+    'metadata.test.js',
     'disc.test.js',
     'rename.test.js',
     'handbrake.test.js',

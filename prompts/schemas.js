@@ -16,7 +16,8 @@ const SuggestedSearchSchema = z.object({
 // Schema for query extraction (cleaning user input before TMDB search)
 const QueryExtractionSchema = z.object({
     searchQuery: z.string().describe('The cleaned title to search TMDB (just the show/movie name, no extra words)'),
-    season: z.number().nullable().describe('Season number if mentioned by user, or null'),
+    season: z.number().nullable().describe('Season number if single season mentioned by user, or null. If multiple seasons, use seasons array instead'),
+    seasons: z.array(z.number()).nullable().optional().describe('Array of season numbers if user specified multiple (e.g., "season 5 & 6" → [5, 6]), or null for single season'),
     disc: z.number().nullable().describe('Disc number if mentioned by user, or null'),
     year: z.number().nullable().describe('Year if mentioned by user (e.g., "Avatar 2009"), or null'),
     isTV: z.boolean().describe('Whether this appears to be a TV show (vs movie)'),

@@ -1,0 +1,31 @@
+{
+  "_comment": "OpenAI does not provide a pricing API - update this file manually when prices change",
+  "lastUpdated": "2026-02-05",
+  "models": {
+    "gpt-4o": {
+      "inputCostPer1M": 2.50,
+      "outputCostPer1M": 10.00,
+      "description": "Most capable, recommended for complex multi-disc box sets"
+    },
+    "gpt-4o-mini": {
+      "inputCostPer1M": 0.15,
+      "outputCostPer1M": 0.60,
+      "description": "Cost-effective, good for single-season discs"
+    },
+    "gpt-4-turbo": {
+      "inputCostPer1M": 10.00,
+      "outputCostPer1M": 30.00,
+      "description": "Previous generation, more expensive than gpt-4o"
+    },
+    "gpt-3.5-turbo": {
+      "inputCostPer1M": 0.50,
+      "outputCostPer1M": 1.50,
+      "description": "Older model, not recommended for DVD mapping"
+    }
+  },
+  "estimatedTokensPerDisc": {
+    "input": 5000,
+    "output": 2000,
+    "note": "Average for TV disc with ~20 tracks. Movies use less, complex box sets may use more."
+  }
+}

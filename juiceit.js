@@ -198,6 +198,12 @@ if (process.env.JUICEIT_TEST_MODE === 'true') {
         process.exit(0);
     }
 
+    // Show pricing if requested
+    if (options.showPricing) {
+        help.showPricing();
+        process.exit(0);
+    }
+
 // Check for first-run setup (no config exists yet)
 if (config.isFirstRun() && !options.runSetup && !options.showHelp && !options.showVersion && !options.rawMode) {
     (async () => {
@@ -274,7 +280,8 @@ if (process.env.JUICEIT_TEST_MODE === 'true') {
         buildProposedMappingsFromAI: (aiMappingResult, metadata, numTitles, trackDurations) =>
             mapping.buildProposedMappingsFromAI(aiMappingResult, metadata, numTitles, trackDurations, {
                 unrippableTracks: global.unrippableTracks || [],
-                mainOnly: options.mainOnly
+                mainOnly: options.mainOnly,
+                ripAll: options.ripAll
             }),
 
         // Interactive functions (from interactive module)
@@ -284,6 +291,8 @@ if (process.env.JUICEIT_TEST_MODE === 'true') {
         reviewFinalMappings: interactive.reviewFinalMappings,
         editIndividualTrack: interactive.editIndividualTrack,
         interactiveStepThrough: interactive.interactiveStepThrough,
+        confirmBeforeRip: interactive.confirmBeforeRip,
+        reviewAndMapEpisodesBeforeRip: interactive.reviewAndMapEpisodesBeforeRip,
 
         // Utility functions (re-exported from naming.js)
         sanitizeForPlex,

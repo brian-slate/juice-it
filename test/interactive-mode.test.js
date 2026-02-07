@@ -1116,6 +1116,198 @@ async function testFlowExitAtAnyPoint() {
 }
 
 // ============================================================================
+// Part 8: Confirmation Flow Tests (confirmBeforeRip)
+// ============================================================================
+
+async function testConfirmBeforeRipAccept() {
+    console.log('Test: confirmBeforeRip - Accept and rip');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    enquirerMock.setResponses(['🍊 Juice it!']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'test', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'rip', 'Should return rip action');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipResearch() {
+    console.log('Test: confirmBeforeRip - Re-search with new query');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    // Select re-search, then provide new query
+    enquirerMock.setResponses(['🔍 Re-search with different query', 'New Show Name season 2']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'Old Show', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'search', 'Should return search action');
+    assert.strictEqual(result.newQuery, 'New Show Name season 2', 'Should include new query');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipResearchEmptyQuery() {
+    console.log('Test: confirmBeforeRip - Re-search with empty query loops back');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    // Select re-search, provide empty query (should loop back), then accept
+    enquirerMock.setResponses(['🔍 Re-search with different query', '', '🍊 Juice it!']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'test', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'rip', 'Should loop back and then rip');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipEdit() {
+    console.log('Test: confirmBeforeRip - Edit mappings');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    enquirerMock.setResponses(['✏️  Edit mappings']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'test', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'edit', 'Should return edit action');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipInteractiveMode() {
+    console.log('Test: confirmBeforeRip - Switch to full interactive mode');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    enquirerMock.setResponses(['📋 Full interactive mode']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'test', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'interactive', 'Should return interactive action');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipCancel() {
+    console.log('Test: confirmBeforeRip - Cancel ripping');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    enquirerMock.setResponses(['❌ Cancel']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: 'test', interactive: false, rawMode: false }
+    );
+
+    assert.strictEqual(result.action, 'cancel', 'Should return cancel action');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+async function testConfirmBeforeRipNoResearchInRawMode() {
+    console.log('Test: confirmBeforeRip - No re-search option in raw mode');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    // In raw mode, re-search shouldn't be an option
+    enquirerMock.setResponses(['🍊 Juice it!']);
+
+    const result = await juiceit.confirmBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        { searchQuery: null, interactive: false, rawMode: true }
+    );
+
+    assert.strictEqual(result.action, 'rip', 'Should rip in raw mode');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
+// Part 9: Back Navigation Tests
+// ============================================================================
+
+async function testReviewAndMapBackNavigation() {
+    console.log('Test: reviewAndMapEpisodesBeforeRip - Back navigation returns special marker');
+    setup();
+    suppressConsole();
+
+    const mappings = JSON.parse(JSON.stringify(mockAIMappingShortForm.mappings));
+
+    // User selects "Back to confirmation menu"
+    enquirerMock.setResponses(['← Back to confirmation menu']);
+
+    const result = await juiceit.reviewAndMapEpisodesBeforeRip(
+        mappings,
+        mockTVMetadataShortForm,
+        'ED_EDD_N_EDDY_S05',
+        'Ed, Edd n Eddy (1999)',
+        { interactive: true, verbose: false }
+    );
+
+    // Should return special marker indicating back action
+    assert.strictEqual(result._action, 'back', 'Should return back action marker');
+
+    restoreConsole();
+    teardown();
+    console.log('  ✓ PASS\n');
+}
+
+// ============================================================================
 // RUN ALL TESTS
 // ============================================================================
 
@@ -1174,6 +1366,18 @@ async function runAllTests() {
         await testFlowChangeStartEpisodeThenAccept();
         await testFlowEditTrackThenAccept();
         await testFlowExitAtAnyPoint();
+
+        // Part 8: Confirmation Flow (confirmBeforeRip)
+        await testConfirmBeforeRipAccept();
+        await testConfirmBeforeRipResearch();
+        await testConfirmBeforeRipResearchEmptyQuery();
+        await testConfirmBeforeRipEdit();
+        await testConfirmBeforeRipInteractiveMode();
+        await testConfirmBeforeRipCancel();
+        await testConfirmBeforeRipNoResearchInRawMode();
+
+        // Part 9: Back Navigation
+        await testReviewAndMapBackNavigation();
 
         console.log('━'.repeat(60));
         console.log('  ✅ All interactive mode tests passed!');

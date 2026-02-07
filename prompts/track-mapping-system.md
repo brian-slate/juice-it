@@ -21,32 +21,30 @@ Many DVDs bundle multiple episodes per track. For example:
 
 **If tracks are approximately 2x, 3x, or 4x the individual episode runtime, they likely contain that many episodes bundled together.** Assign MULTIPLE episode indices to such tracks (e.g., a 22-min track containing two 11-min episodes should map to episodes 0 AND 1).
 
-### CRITICAL: Episode-Length Tracks Are NEVER Featurettes
+### Episode-Length Tracks
 
-**This is extremely important:** If a track has a duration that matches the episode runtime pattern (1x, 2x, or 3x the TMDB episode runtime), it is an EPISODE, not a featurette.
+**Key principle:** The FIRST N episode-length tracks are the real episodes. Any EXTRA episode-length tracks beyond what the season contains should be treated as featurettes.
 
-**WRONG reasoning:** "Track 5 is similar in length to other episode tracks but..." → classifying as featurette
-**CORRECT reasoning:** "Track 5 matches episode runtime → it's an episode"
+**How to handle episode-length tracks:**
 
-**Only classify a track as a featurette if:**
-- Its duration does NOT match 1x, 2x, or 3x the episode runtime
-- AND it's significantly shorter than episode tracks (e.g., 2-5 minutes when episodes are 22 minutes)
-- AND there are too many episode-length tracks to fit the remaining episodes (rare edge case)
+1. **Calculate expected episodes on this disc** (see "Determining Episode Start Position" below)
+2. **Count how many episode-length tracks you have** (tracks matching 1x, 2x, or 3x TMDB episode runtime)
+3. **Map the FIRST tracks needed** to cover the expected episodes
+4. **Mark any EXTRA episode-length tracks** as featurettes with `extraType: "featurette"` and `extraDescription: "Extra Track"`
 
-**Example of WRONG classification:**
-- Episode runtime: 11 minutes, so tracks should be ~22 min (2 episodes)
-- Tracks 2-7 are all 23 minutes each
-- WRONG: "Tracks 5-7 are featurettes" ← NO! They match episode runtime!
-- CORRECT: "Tracks 2-7 are all episode tracks" ← All 6 tracks are episodes
+**Example:**
+- Season 5 has 22 episodes total
+- This is Disc 2 (S5D2), containing episodes 14-22 (9 episodes)
+- You find 9 episode-length tracks → map all 9 to episodes 14-22
+- You find 11 episode-length tracks → map FIRST 9 to episodes 14-22, mark remaining 2 as featurettes
 
-### Extra Episode-Length Tracks (Map Them, Don't Skip)
-If you find MORE episode-length tracks than your calculation expected:
-- **DO NOT assume they are duplicates or extras**
-- **DO NOT skip them** - your starting episode calculation might be wrong
-- **MAP THEM to the next sequential episodes** beyond what you've already mapped
-- Example: If you mapped tracks 1-6 to episodes 12-22, and tracks 15-17 are also 23 min each, map them to episodes 23-28 (or whatever comes next)
-- The user can always skip tracks manually if they turn out to be duplicates
-- A 23-min track for an 11-min episode show is ALWAYS an episode track, never a featurette
+**What makes a track "episode-length":**
+- Duration matches ~1x, ~2x, or ~3x the TMDB episode runtime (within tolerance)
+- For 11-min episode shows: ~11 min, ~22 min, or ~33 min tracks are episode-length
+
+**What is NOT episode-length:**
+- Very short tracks (2-5 min when episodes are 22 min) → these are menu transitions or short extras
+- Very long tracks matching total disc runtime → Play All compilation
 
 ### "Play All" Compilation Tracks
 TV show DVDs often include a long track that plays all episodes consecutively:
@@ -146,10 +144,25 @@ The **DVD Volume Name** indicates which disc this is. You MUST analyze the volum
 - Track 6 → Episodes 23-24
 - Track 7 → Episode 25 (Take This Ed and Shove It - double length)
 
-**KEY INSIGHT**: The episode count method is more accurate than midpoint because DVD splits aren't always even. A 25-episode season might split 14/11 rather than 12/13.
+**KEY INSIGHT**: The episode count method works from the END of the season backward. DVD splits aren't always even - a 25-episode season might split 14/11 rather than 12/13.
 
-**WRONG approach**: Only counting some tracks as episodes, marking others as featurettes
-**CORRECT approach**: ALL tracks matching 1x or 2x episode runtime are episodes
+### Handling Extra Episode-Length Tracks
+
+**IMPORTANT**: DVDs sometimes include MORE episode-length tracks than actual episodes. When you find excess tracks:
+
+1. **Calculate expected episodes remaining** in the season after accounting for previous discs
+2. **Map the FIRST N episode-length tracks** to those episodes (in track order)
+3. **Mark any EXTRA episode-length tracks** as featurettes:
+   - `shouldSkip: false` (still rip them)
+   - `extraType: "featurette"`
+   - `extraDescription: "Extra Track"`
+
+**Example:**
+- Season has 22 episodes, Disc 2 starts at episode 14
+- Episodes remaining: 22 - 13 = 9 episodes (episodes 14-22)
+- You find 11 episode-length tracks
+- Map FIRST tracks to eps 14-22 (9 episodes = ~5 tracks for 2-ep bundles or 9 tracks for singles)
+- Mark remaining 2 tracks as featurettes
 
 **Trust the volume name's disc indicator over the user's query disc number.**
 
